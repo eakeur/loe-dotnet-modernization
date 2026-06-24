@@ -101,8 +101,14 @@ public static class HtmlReportGenerator
           .issue-item{background:rgba(248,81,73,.08);border-left:2px solid var(--danger);border-radius:0 4px 4px 0;padding:6px 10px;font-size:11px;font-family:var(--mono);color:var(--text)}
           .issue-item.warn{background:rgba(210,153,34,.08);border-left-color:var(--warn)}
           .pkg-list{display:flex;flex-direction:column;gap:3px;max-height:260px;overflow-y:auto}
-          .pkg-row{display:flex;align-items:center;justify-content:space-between;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:5px 10px;font-size:11px}
-          .pkg-name{font-family:var(--mono);color:var(--text)}.pkg-ver{font-family:var(--mono);color:var(--muted)}
+          .pkg-row{display:flex;align-items:center;gap:6px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:5px 10px;font-size:11px}
+          .pkg-name{font-family:var(--mono);color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+          .pkg-ver{font-family:var(--mono);color:var(--muted);flex-shrink:0}.pkg-usage{font-family:var(--mono);font-size:10px;color:var(--muted);flex-shrink:0;white-space:nowrap}
+          .pkg-badges{display:flex;gap:2px;align-items:center;flex-shrink:0}
+          .compat-badge{display:inline-flex;align-items:center;padding:1px 5px;border-radius:3px;font-size:9px;font-family:var(--mono);font-weight:700;white-space:nowrap}
+          .compat-badge.ok{background:rgba(63,185,80,.12);color:var(--accent2);border:1px solid rgba(63,185,80,.3)}
+          .compat-badge.no{background:rgba(248,81,73,.12);color:var(--danger);border:1px solid rgba(248,81,73,.3)}
+          .compat-badge.unk{background:var(--bg3);color:var(--muted);border:1px solid var(--border)}
           .node circle{stroke-width:2px;cursor:pointer}
           .node text{font-family:'JetBrains Mono',monospace;font-size:10px;fill:#e6edf3;pointer-events:none;text-anchor:middle;dominant-baseline:middle}
           .link{stroke:#30363d;stroke-width:1.5;fill:none;marker-end:url(#arrow)}
@@ -166,6 +172,15 @@ public static class HtmlReportGenerator
         const projectMap = {};
         DATA.projects.forEach(p => { projectMap[p.name] = p; });
 
+        const topPkgMap = {};
+        (DATA.summary.topPackages || []).forEach(tp => { topPkgMap[tp.name.toLowerCase()] = tp; });
+
+        function compatBadge(val, label) {
+          const cls  = val === true ? 'ok' : val === false ? 'no' : 'unk';
+          const icon = val === true ? '✓' : val === false ? '✗' : '?';
+          return '<span class="compat-badge ' + cls + '">' + label + ' ' + icon + '</span>';
+        }
+
         let selectedProject = null, filterRisk = 'all', searchQuery = '';
         let transform = { x: 0, y: 0, k: 1 };
         let nodes = [], links = [];
@@ -180,14 +195,21 @@ public static class HtmlReportGenerator
 
         function renderSummaryPills() {
           const s = DATA.summary;
-          document.getElementById('summary-pills').innerHTML = [
+          const pkgs = s.topPackages || [];
+          const net8ok = pkgs.filter(p => p.supportsNet8 === true).length;
+          const net8no = pkgs.filter(p => p.supportsNet8 === false).length;
+          const pills = [
             `<span class="pill"><span class="dot dot-blue"></span>${s.totalProjects} projects</span>`,
             `<span class="pill"><span class="dot dot-muted"></span>${s.testProjects} tests</span>`,
             `<span class="pill"><span class="dot dot-danger"></span>${s.riskSummary.high} high</span>`,
             `<span class="pill"><span class="dot dot-warn"></span>${s.riskSummary.medium} medium</span>`,
             `<span class="pill"><span class="dot dot-green"></span>${s.riskSummary.low} low</span>`,
-            ...(s.frameworkSummary||[]).map(f=>`<span class="pill"><span class="dot dot-muted"></span>${f.count} ${f.class}</span>`)
-          ].join('');
+            ...(s.frameworkSummary||[]).map(f=>`<span class="pill"><span class="dot dot-muted"></span>${f.count} ${f.class}</span>`),
+          ];
+          if (pkgs.length) pills.push(`<span class="pill"><span class="dot dot-muted"></span>${pkgs.length} packages</span>`);
+          if (net8ok)      pills.push(`<span class="pill"><span class="dot dot-green"></span>${net8ok} NET8 ready</span>`);
+          if (net8no)      pills.push(`<span class="pill"><span class="dot dot-danger"></span>${net8no} NET8 issues</span>`);
+          document.getElementById('summary-pills').innerHTML = pills.join('');
         }
 
         function renderProjectList() {
@@ -281,7 +303,20 @@ public static class HtmlReportGenerator
 
           if (pkgs.length) {
             const rows = pkgs.map(function(pkg) {
-              return '<div class="pkg-row"><span class="pkg-name">' + pkg.name + '</span><span class="pkg-ver">' + (pkg.version || '') + '</span></div>';
+              const tp = topPkgMap[pkg.name.toLowerCase()];
+              const usageHtml = tp && tp.usedBy > 1
+                ? '<span class="pkg-usage">' + tp.usedBy + ' projs</span>'
+                : '';
+              const badgesHtml = '<span class="pkg-badges">'
+                + compatBadge(pkg.supportsNet8, 'NET8')
+                + compatBadge(pkg.supportsNet10, 'NET10')
+                + '</span>';
+              return '<div class="pkg-row">'
+                + '<span class="pkg-name">' + pkg.name + '</span>'
+                + badgesHtml
+                + usageHtml
+                + '<span class="pkg-ver">' + (pkg.version || '') + '</span>'
+                + '</div>';
             }).join('');
             html += section('NuGet Packages (' + pkgs.length + ')', '<div class="pkg-list">' + rows + '</div>');
           }

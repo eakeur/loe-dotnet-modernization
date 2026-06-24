@@ -2,7 +2,8 @@ namespace DepTree;
 
 public static class SolutionAnalyzer
 {
-    public static SolutionOutput Analyze(string solutionPath, TextWriter log)
+    public static async Task<SolutionOutput> AnalyzeAsync(
+        string solutionPath, TextWriter log, bool skipNuGet = false)
     {
         var (rootDir, slnFile) = ResolveSolutionRoot(solutionPath);
 
@@ -57,7 +58,6 @@ public static class SolutionAnalyzer
                 if (projectIndex.TryGetValue(refPath, out var target))
                 {
                     resolvedRefs.Add(target.Name);
-                    // Add reverse (dependent) edge
                     target.Dependents.Add(proj.Name);
                 }
                 else
@@ -69,19 +69,72 @@ public static class SolutionAnalyzer
             proj.ProjectRefs = resolvedRefs;
         }
 
-        // ── 4. Build summary ─────────────────────────────────────────────
-        var allProjects = projectIndex.Values.ToList();
+        // ── 4. Check NuGet compatibility ─────────────────────────────────
+        var rawProjects = projectIndex.Values.ToList();
+        Dictionary<string, PackageCompatibility> compatMap = [];
 
+        if (!skipNuGet)
+        {
+            var uniquePkgs = rawProjects
+                .SelectMany(p => p.Packages)
+                .Where(p => NuGetCompatibilityChecker.IsCheckableVersion(p.Version))
+                .Select(p => (p.Name, p.Version))
+                .Distinct()
+                .ToList();
+
+            log.WriteLine();
+            log.WriteLine($"  Checking {uniquePkgs.Count} unique package version(s) on NuGet...");
+
+            var semaphore = new SemaphoreSlim(15, 15);
+            var tasks = uniquePkgs.Select(async pkg =>
+            {
+                await semaphore.WaitAsync();
+                try
+                {
+                    var c = await NuGetCompatibilityChecker.CheckAsync(pkg.Name, pkg.Version);
+                    return ($"{pkg.Name}/{pkg.Version}", c);
+                }
+                finally { semaphore.Release(); }
+            });
+
+            var results = await Task.WhenAll(tasks);
+            compatMap = results.ToDictionary(r => r.Item1, r => r.Item2, StringComparer.OrdinalIgnoreCase);
+
+            var resolved = compatMap.Values.Count(c => c.SupportsNet8.HasValue || c.SupportsNet10.HasValue);
+            log.WriteLine($"  NuGet    : {resolved}/{uniquePkgs.Count} resolved");
+        }
+
+        // ── 5. Rebuild packages with compatibility data ───────────────────
+        var allProjects = rawProjects.Select(p => p with
+        {
+            Packages = p.Packages.Select(pkg =>
+            {
+                var key = $"{pkg.Name}/{pkg.Version}";
+                return compatMap.TryGetValue(key, out var c)
+                    ? pkg with { SupportsNet8 = c.SupportsNet8, SupportsNet10 = c.SupportsNet10 }
+                    : pkg;
+            }).ToList()
+        }).ToList();
+
+        // ── 6. Build summary ─────────────────────────────────────────────
         var topPackages = allProjects
             .SelectMany(p => p.Packages)
             .GroupBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
             .OrderByDescending(g => g.Count())
             .Take(30)
-            .Select(g => new TopPackage
+            .Select(g =>
             {
-                Name     = g.Key,
-                UsedBy   = g.Count(),
-                Versions = [.. g.Select(p => p.Version).Distinct().Order()],
+                var net8  = g.Where(p => p.SupportsNet8.HasValue).Select(p => p.SupportsNet8!.Value).ToList();
+                var net10 = g.Where(p => p.SupportsNet10.HasValue).Select(p => p.SupportsNet10!.Value).ToList();
+
+                return new TopPackage
+                {
+                    Name          = g.Key,
+                    UsedBy        = g.Count(),
+                    Versions      = [.. g.Select(p => p.Version).Distinct().Order()],
+                    SupportsNet8  = net8.Count  == 0 ? null : net8.All(v => v)  ? true : false,
+                    SupportsNet10 = net10.Count == 0 ? null : net10.All(v => v) ? true : false,
+                };
             })
             .ToList();
 
@@ -111,7 +164,7 @@ public static class SolutionAnalyzer
             TopPackages      = topPackages,
         };
 
-        // ── 5. Print summary ─────────────────────────────────────────────
+        // ── 7. Print summary ─────────────────────────────────────────────
         log.WriteLine();
         log.WriteLine("  -- Summary ------------------------------------------");
         log.WriteLine($"  Total projects : {summary.TotalProjects}");

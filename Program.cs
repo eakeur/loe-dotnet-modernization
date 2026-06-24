@@ -5,6 +5,7 @@ using DepTree;
 var solutionPath = ".";
 var outputDir    = ".";
 var outputName   = "dependency-tree";
+var skipNuGet    = false;
 
 for (var i = 0; i < args.Length; i++)
 {
@@ -19,6 +20,9 @@ for (var i = 0; i < args.Length; i++)
         case "--name" or "-n" when i + 1 < args.Length:
             outputName = args[++i];
             break;
+        case "--no-nuget" or "--skip-nuget":
+            skipNuGet = true;
+            break;
         case "--help" or "-h":
             PrintHelp();
             return 0;
@@ -28,7 +32,7 @@ for (var i = 0; i < args.Length; i++)
 // ── Run ───────────────────────────────────────────────────────────────────────
 try
 {
-    var data = SolutionAnalyzer.Analyze(solutionPath, Console.Out);
+    var data = await SolutionAnalyzer.AnalyzeAsync(solutionPath, Console.Out, skipNuGet);
 
     Directory.CreateDirectory(outputDir);
 
@@ -73,11 +77,13 @@ static void PrintHelp()
         -s, --solution <path>     Path to .sln file or solution root directory (default: .)
         -o, --output-dir <path>   Output directory for JSON and HTML files (default: .)
         -n, --name <name>         Base name for output files (default: dependency-tree)
+            --no-nuget            Skip NuGet compatibility check (faster, offline-friendly)
         -h, --help                Show this help
 
       Examples:
         dotnet run -- --solution C:\repos\MyApp\MyApp.sln
         dotnet run -- -s C:\repos\MyApp -o C:\reports -n my-solution
+        dotnet run -- -s . --no-nuget
 
     """);
 }

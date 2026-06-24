@@ -38,6 +38,8 @@ public record PackageRef
 {
     public string Name { get; init; } = "";
     public string Version { get; init; } = "";
+    public bool? SupportsNet8 { get; init; }
+    public bool? SupportsNet10 { get; init; }
 }
 
 public record MigrationRisk
@@ -77,6 +79,8 @@ public record TopPackage
     public string Name { get; init; } = "";
     public int UsedBy { get; init; }
     public List<string> Versions { get; init; } = [];
+    public bool? SupportsNet8 { get; init; }
+    public bool? SupportsNet10 { get; init; }
 }
 
 public record SolutionOutput
