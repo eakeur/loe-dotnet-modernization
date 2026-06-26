@@ -27,10 +27,11 @@ public static class CsvExporter
             Map(m => m.Version).Index(2).Name("Version");
             Map(m => m.TargetFramework).Index(3).Name("TargetFramework");
             Map(m => m.SupportsNet8).Index(4).Name("SupportsNet8");
-            Map(m => m.InternalProjectDependencies).Index(5).Name("InternalProjectDependencies");
-            Map(m => m.IsTestProject).Index(6).Name("IsTestProject");
-            Map(m => m.ProjectFormat).Index(7).Name("ProjectFormat");
-            Map(m => m.Level).Index(8).Name("Level");
+            Map(m => m.PackageFrameworks).Index(5).Name("PackageFrameworks");
+            Map(m => m.InternalProjectDependencies).Index(6).Name("InternalProjectDependencies");
+            Map(m => m.IsTestProject).Index(7).Name("IsTestProject");
+            Map(m => m.ProjectFormat).Index(8).Name("ProjectFormat");
+            Map(m => m.Level).Index(9).Name("Level");
         }
     }
 }

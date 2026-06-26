@@ -32,7 +32,7 @@ public class NuGetCompatibilityChecker(string? solutionDir = null, string? expli
         Console.Error.WriteLine($"Checking .NET 8 compatibility for {withVersion.Count} package(s) across {repositories.Count} source(s)...");
 
         using var cache = new SourceCacheContext();
-        var resultCache = new ConcurrentDictionary<string, bool?>(StringComparer.OrdinalIgnoreCase);
+        var resultCache = new ConcurrentDictionary<string, (bool? SupportsNet8, string Frameworks)>(StringComparer.OrdinalIgnoreCase);
 
         int compatible = 0, incompatible = 0, unknown = 0, notFound = 0;
 
@@ -52,11 +52,13 @@ public class NuGetCompatibilityChecker(string? solutionDir = null, string? expli
             {
                 if (resultCache.TryGetValue(cacheKey, out var cached))
                 {
-                    row.SupportsNet8 = cached;
+                    row.SupportsNet8 = cached.SupportsNet8;
+                    row.PackageFrameworks = cached.Frameworks;
                     return;
                 }
 
-                bool? result = null;
+                bool? supportsNet8 = null;
+                string frameworks = "";
                 bool found = false;
 
                 foreach (var repo in repositories)
@@ -70,7 +72,7 @@ public class NuGetCompatibilityChecker(string? solutionDir = null, string? expli
                         if (depInfo is not null)
                         {
                             found = true;
-                            result = CheckCompatibility(depInfo);
+                            (supportsNet8, frameworks) = Analyze(depInfo);
                             break;
                         }
                     }
@@ -87,12 +89,13 @@ public class NuGetCompatibilityChecker(string? solutionDir = null, string? expli
                     Console.Error.WriteLine($"Warning: {row.Name} {row.Version} not found in any configured source.");
                     Interlocked.Increment(ref notFound);
                 }
-                else if (result is true) Interlocked.Increment(ref compatible);
-                else if (result is false) Interlocked.Increment(ref incompatible);
+                else if (supportsNet8 is true) Interlocked.Increment(ref compatible);
+                else if (supportsNet8 is false) Interlocked.Increment(ref incompatible);
                 else Interlocked.Increment(ref unknown);
 
-                resultCache[cacheKey] = result;
-                row.SupportsNet8 = result;
+                resultCache[cacheKey] = (supportsNet8, frameworks);
+                row.SupportsNet8 = supportsNet8;
+                row.PackageFrameworks = frameworks;
             }
             finally
             {
@@ -131,19 +134,37 @@ public class NuGetCompatibilityChecker(string? solutionDir = null, string? expli
         return sources.Select(s => Repository.Factory.GetCoreV3(s)).ToList();
     }
 
-    private static bool? CheckCompatibility(FindPackageByIdDependencyInfo depInfo)
+    // Returns (supportsNet8, semicolon-separated list of target framework monikers)
+    private static (bool? SupportsNet8, string Frameworks) Analyze(FindPackageByIdDependencyInfo depInfo)
     {
         var groups = depInfo.DependencyGroups.ToList();
-        if (groups.Count == 0) return null;
+        if (groups.Count == 0) return (null, "");
+
+        bool supportsNet8 = false;
+        var monikers = new List<string>();
 
         foreach (var group in groups)
         {
             var tf = group.TargetFramework;
+
+            string moniker;
             if (tf.IsAny || tf == NuGetFramework.AnyFramework)
-                return true;
-            if (DefaultCompatibilityProvider.Instance.IsCompatible(Net8, tf))
-                return true;
+            {
+                moniker = "any";
+                supportsNet8 = true;
+            }
+            else
+            {
+                moniker = tf.GetShortFolderName();
+                if (DefaultCompatibilityProvider.Instance.IsCompatible(Net8, tf))
+                    supportsNet8 = true;
+            }
+
+            if (!string.IsNullOrEmpty(moniker))
+                monikers.Add(moniker);
         }
-        return false;
+
+        var frameworks = string.Join(";", monikers.Order());
+        return (supportsNet8, frameworks);
     }
 }

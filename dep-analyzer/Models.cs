@@ -7,6 +7,7 @@ public record DependencyRow
     public string Version { get; init; } = "";
     public string TargetFramework { get; init; } = "";
     public bool? SupportsNet8 { get; set; }
+    public string PackageFrameworks { get; set; } = "";
     public int InternalProjectDependencies { get; init; }
     public bool IsTestProject { get; init; }
     public string ProjectFormat { get; init; } = "";
