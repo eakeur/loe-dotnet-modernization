@@ -62,9 +62,10 @@ try
 
     Console.Error.WriteLine($"Parsed {projects.Count} project(s) successfully.");
 
-    // 3. Build dependency graph and compute levels
+    // 3. Build dependency graph and compute levels (pass solution dir for CPM support)
+    var solutionDir = Path.GetDirectoryName(Path.GetFullPath(solutionPath));
     var analyzer = new DependencyAnalyzer();
-    var rows = analyzer.Analyze(projects);
+    var rows = analyzer.Analyze(projects, solutionDir);
 
     // 4. Optional NuGet compatibility check
     if (checkNuget)

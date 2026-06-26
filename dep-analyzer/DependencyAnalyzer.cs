@@ -1,11 +1,17 @@
+using System.Xml.Linq;
+
 namespace DepAnalyzer;
 
 public class DependencyAnalyzer
 {
-    public List<DependencyRow> Analyze(IReadOnlyList<ProjectInfo> projects)
+    public List<DependencyRow> Analyze(IReadOnlyList<ProjectInfo> projects, string? solutionDir = null)
     {
         var solutionSet = projects.Select(p => p.AbsolutePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var levels = ComputeProjectLevels(projects, solutionSet);
+        var cpmVersions = LoadCpmVersions(solutionDir);
+
+        if (cpmVersions.Count > 0)
+            Console.Error.WriteLine($"Central Package Management detected — loaded {cpmVersions.Count} versions from Directory.Packages.props.");
 
         var rows = new List<DependencyRow>();
 
@@ -42,11 +48,16 @@ public class DependencyAnalyzer
 
         foreach (var pkg in allPackages.Values.OrderBy(p => p.Id, StringComparer.OrdinalIgnoreCase))
         {
+            // Fill in version from CPM if missing
+            var version = pkg.Version;
+            if (string.IsNullOrEmpty(version) && cpmVersions.TryGetValue(pkg.Id, out var cpmVer))
+                version = cpmVer;
+
             rows.Add(new DependencyRow
             {
                 Name = pkg.Id,
                 Type = "NuGetPackage",
-                Version = pkg.Version,
+                Version = version,
                 TargetFramework = "",
                 SupportsNet8 = null,
                 InternalProjectDependencies = 0,
@@ -57,6 +68,42 @@ public class DependencyAnalyzer
         }
 
         return rows;
+    }
+
+    private static Dictionary<string, string> LoadCpmVersions(string? startDir)
+    {
+        var empty = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrEmpty(startDir)) return empty;
+
+        var dir = startDir;
+        while (dir != null)
+        {
+            var propsFile = Path.Combine(dir, "Directory.Packages.props");
+            if (File.Exists(propsFile))
+            {
+                try
+                {
+                    var doc = XDocument.Load(propsFile);
+                    return doc.Descendants("PackageVersion")
+                        .Select(el => new
+                        {
+                            Id = el.Attribute("Include")?.Value?.Trim() ?? "",
+                            Version = el.Attribute("Version")?.Value?.Trim()
+                                      ?? el.Element("Version")?.Value?.Trim()
+                                      ?? ""
+                        })
+                        .Where(x => !string.IsNullOrEmpty(x.Id))
+                        .ToDictionary(x => x.Id, x => x.Version, StringComparer.OrdinalIgnoreCase);
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"Warning: Failed to read {propsFile}: {ex.Message}");
+                    return empty;
+                }
+            }
+            dir = Path.GetDirectoryName(dir);
+        }
+        return empty;
     }
 
     private static Dictionary<string, int> ComputeProjectLevels(

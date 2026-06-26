@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using NuGet.Common;
 using NuGet.Frameworks;
 using NuGet.Protocol;
@@ -6,28 +7,32 @@ using NuGet.Versioning;
 
 namespace DepAnalyzer;
 
-public class NuGetCompatibilityChecker
+public class NuGetCompatibilityChecker(string feedUrl = "https://api.nuget.org/v3/index.json")
 {
-    private readonly string _feedUrl;
     private static readonly NuGetFramework Net8 = NuGetFramework.Parse("net8.0");
     private readonly SemaphoreSlim _semaphore = new(10);
-
-    public NuGetCompatibilityChecker(string feedUrl = "https://api.nuget.org/v3/index.json")
-    {
-        _feedUrl = feedUrl;
-    }
 
     public async Task EnrichAsync(List<DependencyRow> rows, CancellationToken ct)
     {
         var packageRows = rows
-            .Where(r => r.Type == "NuGetPackage" && !string.IsNullOrEmpty(r.Version))
+            .Where(r => r.Type == "NuGetPackage")
             .ToList();
 
-        if (packageRows.Count == 0) return;
+        var withVersion = packageRows.Where(r => !string.IsNullOrEmpty(r.Version)).ToList();
+        var withoutVersion = packageRows.Count - withVersion.Count;
 
-        Console.Error.WriteLine($"Checking .NET 8 compatibility for {packageRows.Count} packages via {_feedUrl}...");
+        if (withoutVersion > 0)
+            Console.Error.WriteLine($"Warning: {withoutVersion} package(s) have no version and will be skipped for .NET 8 check.");
 
-        var repository = Repository.Factory.GetCoreV3(_feedUrl);
+        if (withVersion.Count == 0)
+        {
+            Console.Error.WriteLine("No packages with versions found. Skipping .NET 8 check.");
+            return;
+        }
+
+        Console.Error.WriteLine($"Checking .NET 8 compatibility for {withVersion.Count} packages via {feedUrl}...");
+
+        var repository = Repository.Factory.GetCoreV3(feedUrl);
         using var cache = new SourceCacheContext();
 
         FindPackageByIdResource? resource = null;
@@ -37,14 +42,14 @@ public class NuGetCompatibilityChecker
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Warning: Failed to connect to NuGet feed {_feedUrl}: {ex.Message}");
+            Console.Error.WriteLine($"Warning: Failed to connect to NuGet feed {feedUrl}: {ex.Message}");
             return;
         }
 
-        // Cache by "id@version" to avoid duplicate calls
-        var resultCache = new Dictionary<string, bool?>(StringComparer.OrdinalIgnoreCase);
+        // ConcurrentDictionary: safe for concurrent reads and writes from multiple tasks
+        var resultCache = new ConcurrentDictionary<string, bool?>(StringComparer.OrdinalIgnoreCase);
 
-        var tasks = packageRows.Select(async row =>
+        var tasks = withVersion.Select(async row =>
         {
             var cacheKey = $"{row.Name}@{row.Version}";
 
@@ -88,7 +93,7 @@ public class NuGetCompatibilityChecker
 
             var groups = depInfo.DependencyGroups.ToList();
 
-            // No dependency groups at all: treat as unknown (not necessarily incompatible)
+            // No dependency groups: package has no declared framework constraints — treat as unknown
             if (groups.Count == 0) return null;
 
             foreach (var group in groups)
