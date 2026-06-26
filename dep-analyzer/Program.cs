@@ -67,13 +67,10 @@ try
     var analyzer = new DependencyAnalyzer();
     var rows = analyzer.Analyze(projects, solutionDir);
 
-    // 4. Optional NuGet compatibility check
+    // 4. Optional NuGet compatibility check (auto-discovers sources from nuget.config)
     if (checkNuget)
     {
-        var checker = nugetFeed is not null
-            ? new NuGetCompatibilityChecker(nugetFeed)
-            : new NuGetCompatibilityChecker();
-
+        var checker = new NuGetCompatibilityChecker(solutionDir, nugetFeed);
         await checker.EnrichAsync(rows, CancellationToken.None);
     }
 

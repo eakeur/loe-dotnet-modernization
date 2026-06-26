@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using NuGet.Common;
+using NuGet.Configuration;
 using NuGet.Frameworks;
 using NuGet.Protocol;
 using NuGet.Protocol.Core.Types;
@@ -7,50 +8,43 @@ using NuGet.Versioning;
 
 namespace DepAnalyzer;
 
-public class NuGetCompatibilityChecker(string feedUrl = "https://api.nuget.org/v3/index.json")
+public class NuGetCompatibilityChecker(string? solutionDir = null, string? explicitFeedUrl = null)
 {
     private static readonly NuGetFramework Net8 = NuGetFramework.Parse("net8.0");
     private readonly SemaphoreSlim _semaphore = new(10);
 
     public async Task EnrichAsync(List<DependencyRow> rows, CancellationToken ct)
     {
-        var packageRows = rows
-            .Where(r => r.Type == "NuGetPackage")
-            .ToList();
-
+        var packageRows = rows.Where(r => r.Type == "NuGetPackage").ToList();
         var withVersion = packageRows.Where(r => !string.IsNullOrEmpty(r.Version)).ToList();
-        var withoutVersion = packageRows.Count - withVersion.Count;
+        var skipped = packageRows.Count - withVersion.Count;
 
-        if (withoutVersion > 0)
-            Console.Error.WriteLine($"Warning: {withoutVersion} package(s) have no version and will be skipped for .NET 8 check.");
+        if (skipped > 0)
+            Console.Error.WriteLine($"Warning: {skipped} package(s) have no version and will be skipped.");
 
         if (withVersion.Count == 0)
         {
-            Console.Error.WriteLine("No packages with versions found. Skipping .NET 8 check.");
+            Console.Error.WriteLine("No packages with versions found — skipping .NET 8 compatibility check.");
             return;
         }
 
-        Console.Error.WriteLine($"Checking .NET 8 compatibility for {withVersion.Count} packages via {feedUrl}...");
+        var repositories = BuildRepositories();
+        Console.Error.WriteLine($"Checking .NET 8 compatibility for {withVersion.Count} package(s) across {repositories.Count} source(s)...");
 
-        var repository = Repository.Factory.GetCoreV3(feedUrl);
         using var cache = new SourceCacheContext();
-
-        FindPackageByIdResource? resource = null;
-        try
-        {
-            resource = await repository.GetResourceAsync<FindPackageByIdResource>(ct);
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"Warning: Failed to connect to NuGet feed {feedUrl}: {ex.Message}");
-            return;
-        }
-
-        // ConcurrentDictionary: safe for concurrent reads and writes from multiple tasks
         var resultCache = new ConcurrentDictionary<string, bool?>(StringComparer.OrdinalIgnoreCase);
+
+        int compatible = 0, incompatible = 0, unknown = 0, notFound = 0;
 
         var tasks = withVersion.Select(async row =>
         {
+            if (!NuGetVersion.TryParse(row.Version, out var nugetVersion))
+            {
+                Console.Error.WriteLine($"Warning: Cannot parse version '{row.Version}' for {row.Name} — skipping.");
+                Interlocked.Increment(ref unknown);
+                return;
+            }
+
             var cacheKey = $"{row.Name}@{row.Version}";
 
             await _semaphore.WaitAsync(ct);
@@ -62,7 +56,41 @@ public class NuGetCompatibilityChecker(string feedUrl = "https://api.nuget.org/v
                     return;
                 }
 
-                var result = await CheckPackageAsync(resource, cache, row.Name, row.Version, ct);
+                bool? result = null;
+                bool found = false;
+
+                foreach (var repo in repositories)
+                {
+                    try
+                    {
+                        var resource = await repo.GetResourceAsync<FindPackageByIdResource>(ct);
+                        var depInfo = await resource.GetDependencyInfoAsync(
+                            row.Name, nugetVersion, cache, NullLogger.Instance, ct);
+
+                        if (depInfo is not null)
+                        {
+                            found = true;
+                            result = CheckCompatibility(depInfo);
+                            break;
+                        }
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine(
+                            $"Warning: Source '{repo.PackageSource.Name}' failed for {row.Name} {row.Version}: {ex.Message}");
+                    }
+                }
+
+                if (!found)
+                {
+                    Console.Error.WriteLine($"Warning: {row.Name} {row.Version} not found in any configured source.");
+                    Interlocked.Increment(ref notFound);
+                }
+                else if (result is true) Interlocked.Increment(ref compatible);
+                else if (result is false) Interlocked.Increment(ref incompatible);
+                else Interlocked.Increment(ref unknown);
+
                 resultCache[cacheKey] = result;
                 row.SupportsNet8 = result;
             }
@@ -73,51 +101,49 @@ public class NuGetCompatibilityChecker(string feedUrl = "https://api.nuget.org/v
         });
 
         await Task.WhenAll(tasks);
-        Console.Error.WriteLine("NuGet compatibility check complete.");
+
+        Console.Error.WriteLine(
+            $"Check complete: {compatible} compatible, {incompatible} incompatible, " +
+            $"{unknown} unknown, {notFound} not found.");
     }
 
-    private static async Task<bool?> CheckPackageAsync(
-        FindPackageByIdResource resource,
-        SourceCacheContext cache,
-        string id,
-        string version,
-        CancellationToken ct)
+    private List<SourceRepository> BuildRepositories()
     {
-        if (!NuGetVersion.TryParse(version, out var nugetVersion))
-            return null;
+        if (explicitFeedUrl is not null)
+            return [Repository.Factory.GetCoreV3(explicitFeedUrl)];
 
-        try
+        // Auto-discover from NuGet config files (nuget.config, ~/.nuget/NuGet.Config, etc.)
+        var settings = Settings.LoadDefaultSettings(
+            solutionDir ?? Directory.GetCurrentDirectory());
+
+        var sourceProvider = new PackageSourceProvider(settings);
+        var sources = sourceProvider.LoadPackageSources()
+            .Where(s => s.IsEnabled)
+            .ToList();
+
+        if (sources.Count == 0)
         {
-            var depInfo = await resource.GetDependencyInfoAsync(id, nugetVersion, cache, NullLogger.Instance, ct);
-            if (depInfo == null) return null;
-
-            var groups = depInfo.DependencyGroups.ToList();
-
-            // No dependency groups: package has no declared framework constraints — treat as unknown
-            if (groups.Count == 0) return null;
-
-            foreach (var group in groups)
-            {
-                var tf = group.TargetFramework;
-
-                // "Any" framework means it works everywhere
-                if (tf.IsAny || tf == NuGetFramework.AnyFramework)
-                    return true;
-
-                if (DefaultCompatibilityProvider.Instance.IsCompatible(Net8, tf))
-                    return true;
-            }
-
-            return false;
+            Console.Error.WriteLine("Warning: No enabled NuGet sources found in config — falling back to nuget.org.");
+            return [Repository.Factory.GetCoreV3("https://api.nuget.org/v3/index.json")];
         }
-        catch (OperationCanceledException)
+
+        Console.Error.WriteLine($"NuGet sources: {string.Join(", ", sources.Select(s => s.Name))}");
+        return sources.Select(s => Repository.Factory.GetCoreV3(s)).ToList();
+    }
+
+    private static bool? CheckCompatibility(FindPackageByIdDependencyInfo depInfo)
+    {
+        var groups = depInfo.DependencyGroups.ToList();
+        if (groups.Count == 0) return null;
+
+        foreach (var group in groups)
         {
-            throw;
+            var tf = group.TargetFramework;
+            if (tf.IsAny || tf == NuGetFramework.AnyFramework)
+                return true;
+            if (DefaultCompatibilityProvider.Instance.IsCompatible(Net8, tf))
+                return true;
         }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"Warning: Failed to check {id} {version}: {ex.Message}");
-            return null;
-        }
+        return false;
     }
 }
