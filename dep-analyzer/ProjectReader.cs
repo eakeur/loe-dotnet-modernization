@@ -163,10 +163,18 @@ public static class ProjectReader
 
                 try
                 {
-                    var lines = File.ReadAllLines(file).Length;
+                    var rawLines = File.ReadAllLines(file);
                     var key = ext.TrimStart('.').ToLowerInvariant();
-                    byExtension[key] = byExtension.GetValueOrDefault(key) + lines;
-                    total += lines;
+                    var count = key switch
+                    {
+                        "cs" or "razor" or "cshtml" => CountCStyleLines(rawLines),
+                        "vb"                         => CountVbLines(rawLines),
+                        "csproj" or "vbproj" or "asmx" or "resx"
+                            or "xml" or "config" or "aspx" or "ascx" => CountXmlLines(rawLines),
+                        _                            => CountNonBlankLines(rawLines),
+                    };
+                    byExtension[key] = byExtension.GetValueOrDefault(key) + count;
+                    total += count;
                 }
                 catch { /* skip unreadable files */ }
             }
@@ -175,4 +183,111 @@ public static class ProjectReader
 
         return (total, byExtension);
     }
+
+    // Counts non-blank, non-comment lines in C# / Razor / CSHTML files.
+    // Handles // single-line comments and /* */ block comments.
+    private static int CountCStyleLines(string[] lines)
+    {
+        var count = 0;
+        var inBlock = false;
+
+        foreach (var raw in lines)
+        {
+            var line = raw.Trim();
+            if (line.Length == 0) continue;
+
+            if (inBlock)
+            {
+                var end = line.IndexOf("*/", StringComparison.Ordinal);
+                if (end < 0) continue; // still inside block comment
+
+                inBlock = false;
+                // Any non-comment content after */ on the same line?
+                var after = line.Substring(end + 2).Trim();
+                if (after.Length > 0 && !after.StartsWith("//"))
+                    count++;
+                continue;
+            }
+
+            if (line.StartsWith("//")) continue; // single-line comment
+
+            var blockStart = line.IndexOf("/*", StringComparison.Ordinal);
+            if (blockStart >= 0)
+            {
+                var before = line.Substring(0, blockStart).Trim();
+                var blockEnd = line.IndexOf("*/", blockStart + 2, StringComparison.Ordinal);
+                if (blockEnd < 0)
+                {
+                    inBlock = true;
+                    if (before.Length > 0) count++; // code precedes the opening /*
+                }
+                else
+                {
+                    // Inline block comment (opens and closes on same line)
+                    var after = line.Substring(blockEnd + 2).Trim();
+                    if (before.Length > 0 || (after.Length > 0 && !after.StartsWith("//")))
+                        count++;
+                }
+                continue;
+            }
+
+            count++;
+        }
+
+        return count;
+    }
+
+    // Counts non-blank, non-comment lines in VB.NET files.
+    // Single-line comments start with ' or REM.
+    private static int CountVbLines(string[] lines)
+    {
+        var count = 0;
+        foreach (var raw in lines)
+        {
+            var line = raw.Trim();
+            if (line.Length == 0) continue;
+            if (line.StartsWith("'")) continue;
+            if (line.StartsWith("REM ", StringComparison.OrdinalIgnoreCase)) continue;
+            count++;
+        }
+        return count;
+    }
+
+    // Counts non-blank, non-comment lines in XML-based files.
+    // Handles <!-- --> block comments.
+    private static int CountXmlLines(string[] lines)
+    {
+        var count = 0;
+        var inComment = false;
+
+        foreach (var raw in lines)
+        {
+            var line = raw.Trim();
+            if (line.Length == 0) continue;
+
+            if (inComment)
+            {
+                if (line.Contains("-->")) inComment = false;
+                continue;
+            }
+
+            var commentStart = line.IndexOf("<!--", StringComparison.Ordinal);
+            if (commentStart == 0 && !line.Contains("-->"))
+            {
+                inComment = true;
+                continue;
+            }
+
+            // Inline <!-- comment --> — the rest of the line still has markup, count it
+            if (commentStart > 0 && line.IndexOf("-->", commentStart + 4, StringComparison.Ordinal) < 0)
+                inComment = true;
+
+            count++;
+        }
+
+        return count;
+    }
+
+    private static int CountNonBlankLines(string[] lines) =>
+        lines.Count(l => l.Trim().Length > 0);
 }
