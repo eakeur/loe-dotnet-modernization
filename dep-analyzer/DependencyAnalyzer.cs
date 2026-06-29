@@ -21,6 +21,7 @@ public class DependencyAnalyzer
             var internalDeps = project.ProjectRefPaths
                 .Count(r => solutionSet.Contains(r));
 
+            var loc = project.LineCountsByExtension;
             rows.Add(new DependencyRow
             {
                 Name = project.Name,
@@ -31,7 +32,21 @@ public class DependencyAnalyzer
                 InternalProjectDependencies = internalDeps,
                 IsTestProject = project.IsTestProject,
                 ProjectFormat = project.IsSdkStyle ? "SDK-Style" : "Legacy",
-                Level = levels.TryGetValue(project.AbsolutePath, out var lvl) ? lvl : -1
+                Level = levels.TryGetValue(project.AbsolutePath, out var lvl) ? lvl : -1,
+                LinesOfCode = project.TotalLinesOfCode,
+                LinesOfCode_cs = loc.GetValueOrDefault("cs"),
+                LinesOfCode_vb = loc.GetValueOrDefault("vb"),
+                LinesOfCode_csproj = loc.GetValueOrDefault("csproj"),
+                LinesOfCode_vbproj = loc.GetValueOrDefault("vbproj"),
+                LinesOfCode_asmx = loc.GetValueOrDefault("asmx"),
+                LinesOfCode_resx = loc.GetValueOrDefault("resx"),
+                LinesOfCode_json = loc.GetValueOrDefault("json"),
+                LinesOfCode_xml = loc.GetValueOrDefault("xml"),
+                LinesOfCode_config = loc.GetValueOrDefault("config"),
+                LinesOfCode_aspx = loc.GetValueOrDefault("aspx"),
+                LinesOfCode_ascx = loc.GetValueOrDefault("ascx"),
+                LinesOfCode_razor = loc.GetValueOrDefault("razor"),
+                LinesOfCode_cshtml = loc.GetValueOrDefault("cshtml"),
             });
         }
 

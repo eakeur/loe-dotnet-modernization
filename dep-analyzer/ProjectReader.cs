@@ -9,6 +9,17 @@ public static class ProjectReader
         "xunit", "nunit", "mstest", "Microsoft.NET.Test.Sdk"
     };
 
+    private static readonly HashSet<string> TrackedExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".cs", ".vb", ".csproj", ".vbproj", ".asmx", ".resx",
+        ".json", ".xml", ".config", ".aspx", ".ascx", ".razor", ".cshtml"
+    };
+
+    private static readonly HashSet<string> SkippedDirectories = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "bin", "obj"
+    };
+
     public static ProjectInfo? Read(string csprojPath)
     {
         if (!File.Exists(csprojPath))
@@ -31,8 +42,9 @@ public static class ProjectReader
             var packages = ReadPackages(doc, csprojPath, projectDir, isSdkStyle);
             var projectRefs = ReadProjectRefs(doc, projectDir);
             var isTestProject = DetectTestProject(doc, packages);
+            var (totalLoc, locByExt) = CountLines(projectDir);
 
-            return new ProjectInfo(name, csprojPath, isSdkStyle, isTestProject, targetFramework, packages, projectRefs);
+            return new ProjectInfo(name, csprojPath, isSdkStyle, isTestProject, targetFramework, packages, projectRefs, totalLoc, locByExt);
         }
         catch (Exception ex)
         {
@@ -125,5 +137,42 @@ public static class ProjectReader
                 kw.Length < p.Id.Length
                     ? p.Id.Contains(kw, StringComparison.OrdinalIgnoreCase)
                     : p.Id.Equals(kw, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static (int total, Dictionary<string, int> byExtension) CountLines(string projectDir)
+    {
+        var byExtension = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var total = 0;
+
+        try
+        {
+            var files = Directory.EnumerateFiles(projectDir, "*", SearchOption.AllDirectories)
+                .Where(f =>
+                {
+                    var relative = f.Substring(projectDir.Length)
+                        .TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                    return !relative
+                        .Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                        .Any(part => SkippedDirectories.Contains(part));
+                });
+
+            foreach (var file in files)
+            {
+                var ext = Path.GetExtension(file);
+                if (!TrackedExtensions.Contains(ext)) continue;
+
+                try
+                {
+                    var lines = File.ReadAllLines(file).Length;
+                    var key = ext.TrimStart('.').ToLowerInvariant();
+                    byExtension[key] = byExtension.GetValueOrDefault(key) + lines;
+                    total += lines;
+                }
+                catch { /* skip unreadable files */ }
+            }
+        }
+        catch { /* skip unreadable directories */ }
+
+        return (total, byExtension);
     }
 }
