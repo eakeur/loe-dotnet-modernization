@@ -1,0 +1,239 @@
+{
+  "path": "fixtures/sample-solution-basic/SampleApp.sln",
+  "projects": [
+    {
+      "path": "src/SampleApp.Web/SampleApp.Web.csproj",
+      "name": "SampleApp.Web",
+      "targetFrameworks": ["net8.0"],
+      "format": "SdkStyle",
+      "outputType": "Exe",
+      "projectReferencePaths": ["src/SampleApp.Shared/SampleApp.Shared.csproj"],
+      "packageReferences": [
+        {
+          "packageId": "Newtonsoft.Json",
+          "requestedVersion": "13.0.3",
+          "resolvedVersion": "13.0.3",
+          "isCentrallyManaged": false,
+          "isFloatingVersion": false
+        },
+        {
+          "packageId": "Microsoft.EntityFrameworkCore.SqlServer",
+          "requestedVersion": "8.0.6",
+          "resolvedVersion": "8.0.6",
+          "isCentrallyManaged": false,
+          "isFloatingVersion": false
+        },
+        {
+          "packageId": "Serilog.AspNetCore",
+          "requestedVersion": "8.0.1",
+          "resolvedVersion": "8.0.1",
+          "isCentrallyManaged": false,
+          "isFloatingVersion": false
+        }
+      ],
+      "evaluation": { "succeeded": true, "errorMessage": null },
+      "directoryBuildPropsChain": ["Directory.Build.props"],
+      "directoryBuildTargetsChain": [],
+      "metadata": {
+        "rawProperties": {
+          "TargetFramework": "net8.0",
+          "OutputType": "Exe",
+          "AssemblyName": "SampleApp.Web",
+          "RootNamespace": "SampleApp.Web",
+          "Nullable": "enable",
+          "ImplicitUsings": "enable"
+        },
+        "format": "SdkStyle",
+        "packagesModel": "PackageReference",
+        "isCentrallyManaged": false,
+        "targetFrameworkRaw": "net8.0",
+        "targetFrameworkClassification": "Modern",
+        "outputType": "Exe",
+        "projectTypeGuids": [],
+        "langVersion": null,
+        "nullable": "enable",
+        "implicitUsings": true,
+        "allowUnsafeBlocks": false,
+        "treatWarningsAsErrors": false,
+        "defineConstants": [],
+        "assemblyName": "SampleApp.Web",
+        "rootNamespace": "SampleApp.Web",
+        "runtimeIdentifiers": [],
+        "platformTarget": "AnyCPU",
+        "useWindowsForms": false,
+        "useWpf": false,
+        "isPackable": false,
+        "legacySignals": {
+          "referencesSystemWeb": false,
+          "referencesSystemServiceModel": false,
+          "referencesSystemMessaging": false,
+          "comReferences": [],
+          "hasPInvokeSignals": false,
+          "hasAppConfig": false,
+          "hasWebConfig": false,
+          "usesConfigurationManager": false,
+          "legacyAssemblyReferences": [],
+          "hasWebConfigTransforms": false,
+          "windowsOnlyAssemblyReferences": []
+        },
+        "directoryBuildPropsChain": ["Directory.Build.props"],
+        "directoryBuildTargetsChain": [],
+        "isTestProject": false,
+        "testFramework": null
+      }
+    },
+    {
+      "path": "src/SampleApp.LegacyService/SampleApp.LegacyService.csproj",
+      "name": "SampleApp.LegacyService",
+      "targetFrameworks": ["net48"],
+      "format": "LegacyStyle",
+      "outputType": "Library",
+      "projectReferencePaths": ["src/SampleApp.Shared/SampleApp.Shared.csproj"],
+      "packageReferences": [
+        {
+          "packageId": "Newtonsoft.Json",
+          "requestedVersion": "9.0.1",
+          "resolvedVersion": "9.0.1",
+          "isCentrallyManaged": false,
+          "isFloatingVersion": false
+        },
+        {
+          "packageId": "EntityFramework",
+          "requestedVersion": "6.4.4",
+          "resolvedVersion": "6.4.4",
+          "isCentrallyManaged": false,
+          "isFloatingVersion": false
+        }
+      ],
+      "evaluation": { "succeeded": true, "errorMessage": null },
+      "directoryBuildPropsChain": ["Directory.Build.props"],
+      "directoryBuildTargetsChain": [],
+      "metadata": {
+        "rawProperties": {
+          "TargetFrameworkVersion": "v4.8",
+          "OutputType": "Library",
+          "AssemblyName": "SampleApp.LegacyService",
+          "RootNamespace": "SampleApp.LegacyService"
+        },
+        "format": "LegacyStyle",
+        "packagesModel": "PackagesConfig",
+        "isCentrallyManaged": false,
+        "targetFrameworkRaw": "net48",
+        "targetFrameworkClassification": "NetFramework",
+        "outputType": "Library",
+        "projectTypeGuids": ["{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}"],
+        "langVersion": null,
+        "nullable": null,
+        "implicitUsings": null,
+        "allowUnsafeBlocks": false,
+        "treatWarningsAsErrors": false,
+        "defineConstants": ["TRACE", "DEBUG"],
+        "assemblyName": "SampleApp.LegacyService",
+        "rootNamespace": "SampleApp.LegacyService",
+        "runtimeIdentifiers": [],
+        "platformTarget": "AnyCPU",
+        "useWindowsForms": false,
+        "useWpf": false,
+        "isPackable": null,
+        "legacySignals": {
+          "referencesSystemWeb": true,
+          "referencesSystemServiceModel": true,
+          "referencesSystemMessaging": false,
+          "comReferences": ["Interop.MAPI"],
+          "hasPInvokeSignals": false,
+          "hasAppConfig": true,
+          "hasWebConfig": false,
+          "usesConfigurationManager": true,
+          "legacyAssemblyReferences": ["System.Web", "System.ServiceModel"],
+          "hasWebConfigTransforms": false,
+          "windowsOnlyAssemblyReferences": []
+        },
+        "directoryBuildPropsChain": ["Directory.Build.props"],
+        "directoryBuildTargetsChain": [],
+        "isTestProject": false,
+        "testFramework": null,
+        "diagnostics": [
+          {
+            "severity": "Warning",
+            "code": "NU1701",
+            "message": "Package 'EntityFramework 6.4.4' was restored using '.NETFramework,Version=v4.6.1' instead of the project target framework 'net48'.",
+            "file": "packages.config",
+            "lineNumber": null
+          }
+        ]
+      }
+    },
+    {
+      "path": "src/SampleApp.Shared/SampleApp.Shared.csproj",
+      "name": "SampleApp.Shared",
+      "targetFrameworks": ["netstandard2.0"],
+      "format": "SdkStyle",
+      "outputType": "Library",
+      "projectReferencePaths": [],
+      "packageReferences": [
+        {
+          "packageId": "Newtonsoft.Json",
+          "requestedVersion": "13.0.1",
+          "resolvedVersion": "13.0.1",
+          "isCentrallyManaged": false,
+          "isFloatingVersion": false
+        }
+      ],
+      "evaluation": { "succeeded": true, "errorMessage": null },
+      "directoryBuildPropsChain": ["Directory.Build.props"],
+      "directoryBuildTargetsChain": [],
+      "metadata": {
+        "rawProperties": {
+          "TargetFramework": "netstandard2.0",
+          "OutputType": "Library",
+          "AssemblyName": "SampleApp.Shared",
+          "RootNamespace": "SampleApp.Shared",
+          "Nullable": "enable"
+        },
+        "format": "SdkStyle",
+        "packagesModel": "PackageReference",
+        "isCentrallyManaged": false,
+        "targetFrameworkRaw": "netstandard2.0",
+        "targetFrameworkClassification": "NetStandard",
+        "outputType": "Library",
+        "projectTypeGuids": [],
+        "langVersion": null,
+        "nullable": "enable",
+        "implicitUsings": true,
+        "allowUnsafeBlocks": false,
+        "treatWarningsAsErrors": false,
+        "defineConstants": [],
+        "assemblyName": "SampleApp.Shared",
+        "rootNamespace": "SampleApp.Shared",
+        "runtimeIdentifiers": [],
+        "platformTarget": "AnyCPU",
+        "useWindowsForms": false,
+        "useWpf": false,
+        "isPackable": true,
+        "legacySignals": {
+          "referencesSystemWeb": false,
+          "referencesSystemServiceModel": false,
+          "referencesSystemMessaging": false,
+          "comReferences": [],
+          "hasPInvokeSignals": false,
+          "hasAppConfig": false,
+          "hasWebConfig": false,
+          "usesConfigurationManager": false,
+          "legacyAssemblyReferences": [],
+          "hasWebConfigTransforms": false,
+          "windowsOnlyAssemblyReferences": []
+        },
+        "directoryBuildPropsChain": ["Directory.Build.props"],
+        "directoryBuildTargetsChain": [],
+        "isTestProject": false,
+        "testFramework": null
+      }
+    }
+  ],
+  "nuGetSources": [
+    { "name": "nuget.org", "url": "https://api.nuget.org/v3/index.json", "isEnabled": true, "configFilePath": null }
+  ],
+  "directoryBuildPropsFiles": ["Directory.Build.props"],
+  "directoryBuildTargetsFiles": [],
+  "directoryPackagesPropsPath": null
+}

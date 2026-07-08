@@ -1,0 +1,42 @@
+[
+  {
+    "filePath": "src/SampleApp.LegacyService/Services/OrderNotifier.cs",
+    "lineNumber": 4,
+    "matchedSymbol": "System.Web",
+    "kind": "UsingDirective",
+    "projectPath": "src/SampleApp.LegacyService/SampleApp.LegacyService.csproj",
+    "codeSnippet": "using System.Web;"
+  },
+  {
+    "filePath": "src/SampleApp.LegacyService/Services/OrderNotifier.cs",
+    "lineNumber": 27,
+    "matchedSymbol": "System.Web.HttpContext",
+    "kind": "TypeReference",
+    "projectPath": "src/SampleApp.LegacyService/SampleApp.LegacyService.csproj",
+    "codeSnippet": "var ctx = HttpContext.Current;"
+  },
+  {
+    "filePath": "src/SampleApp.Web/Program.cs",
+    "lineNumber": 1,
+    "matchedSymbol": "SampleApp.Shared",
+    "kind": "UsingDirective",
+    "projectPath": "src/SampleApp.Web/SampleApp.Web.csproj",
+    "codeSnippet": "using SampleApp.Shared;"
+  },
+  {
+    "filePath": "src/SampleApp.Web/Program.cs",
+    "lineNumber": 12,
+    "matchedSymbol": "SampleApp.Shared.OrderDto",
+    "kind": "TypeReference",
+    "projectPath": "src/SampleApp.Web/SampleApp.Web.csproj",
+    "codeSnippet": "var order = new OrderDto();"
+  },
+  {
+    "filePath": "src/SampleApp.LegacyService/Services/OrderNotifier.cs",
+    "lineNumber": 33,
+    "matchedSymbol": "System.ServiceModel.OperationContext",
+    "kind": "MemberAccess",
+    "projectPath": "src/SampleApp.LegacyService/SampleApp.LegacyService.csproj",
+    "codeSnippet": "OperationContext.Current.GetCallbackChannel<INotifyCallback>();"
+  }
+]

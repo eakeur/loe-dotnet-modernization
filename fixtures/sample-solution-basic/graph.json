@@ -1,0 +1,51 @@
+{
+  "nodes": [
+    { "id": "src/SampleApp.Web/SampleApp.Web.csproj", "kind": "Project", "projectVersions": null, "hasVersionConflict": null },
+    { "id": "src/SampleApp.LegacyService/SampleApp.LegacyService.csproj", "kind": "Project", "projectVersions": null, "hasVersionConflict": null },
+    { "id": "src/SampleApp.Shared/SampleApp.Shared.csproj", "kind": "Project", "projectVersions": null, "hasVersionConflict": null },
+    {
+      "id": "Newtonsoft.Json",
+      "kind": "Package",
+      "projectVersions": [
+        { "projectPath": "src/SampleApp.Web/SampleApp.Web.csproj", "version": "13.0.3" },
+        { "projectPath": "src/SampleApp.LegacyService/SampleApp.LegacyService.csproj", "version": "9.0.1" },
+        { "projectPath": "src/SampleApp.Shared/SampleApp.Shared.csproj", "version": "13.0.1" }
+      ],
+      "hasVersionConflict": true
+    },
+    {
+      "id": "Microsoft.EntityFrameworkCore.SqlServer",
+      "kind": "Package",
+      "projectVersions": [
+        { "projectPath": "src/SampleApp.Web/SampleApp.Web.csproj", "version": "8.0.6" }
+      ],
+      "hasVersionConflict": false
+    },
+    {
+      "id": "Serilog.AspNetCore",
+      "kind": "Package",
+      "projectVersions": [
+        { "projectPath": "src/SampleApp.Web/SampleApp.Web.csproj", "version": "8.0.1" }
+      ],
+      "hasVersionConflict": false
+    },
+    {
+      "id": "EntityFramework",
+      "kind": "Package",
+      "projectVersions": [
+        { "projectPath": "src/SampleApp.LegacyService/SampleApp.LegacyService.csproj", "version": "6.4.4" }
+      ],
+      "hasVersionConflict": false
+    }
+  ],
+  "edges": [
+    { "fromId": "src/SampleApp.Web/SampleApp.Web.csproj", "toId": "src/SampleApp.Shared/SampleApp.Shared.csproj", "kind": "ProjectToProject", "resolvedPackageVersion": null },
+    { "fromId": "src/SampleApp.LegacyService/SampleApp.LegacyService.csproj", "toId": "src/SampleApp.Shared/SampleApp.Shared.csproj", "kind": "ProjectToProject", "resolvedPackageVersion": null },
+    { "fromId": "src/SampleApp.Web/SampleApp.Web.csproj", "toId": "Newtonsoft.Json", "kind": "ProjectToPackage", "resolvedPackageVersion": "13.0.3" },
+    { "fromId": "src/SampleApp.Web/SampleApp.Web.csproj", "toId": "Microsoft.EntityFrameworkCore.SqlServer", "kind": "ProjectToPackage", "resolvedPackageVersion": "8.0.6" },
+    { "fromId": "src/SampleApp.Web/SampleApp.Web.csproj", "toId": "Serilog.AspNetCore", "kind": "ProjectToPackage", "resolvedPackageVersion": "8.0.1" },
+    { "fromId": "src/SampleApp.LegacyService/SampleApp.LegacyService.csproj", "toId": "Newtonsoft.Json", "kind": "ProjectToPackage", "resolvedPackageVersion": "9.0.1" },
+    { "fromId": "src/SampleApp.LegacyService/SampleApp.LegacyService.csproj", "toId": "EntityFramework", "kind": "ProjectToPackage", "resolvedPackageVersion": "6.4.4" },
+    { "fromId": "src/SampleApp.Shared/SampleApp.Shared.csproj", "toId": "Newtonsoft.Json", "kind": "ProjectToPackage", "resolvedPackageVersion": "13.0.1" }
+  ]
+}
