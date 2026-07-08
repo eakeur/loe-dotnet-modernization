@@ -1,0 +1,23 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Real reference: intentionally crosses net8.0 -> net48 to model an in-progress
+         modernization where a modern project still depends on a legacy one.
+         `dotnet add reference` refuses this due to the TFM mismatch, so it was added by hand. -->
+    <ProjectReference Include="..\Legacy.Net48App\Legacy.Net48App.csproj" />
+    <!-- Intentionally broken: points at a project file that does not exist, to exercise
+         graceful failure handling in the solution parser. -->
+    <ProjectReference Include="..\DoesNotExist\DoesNotExist.csproj" />
+  </ItemGroup>
+
+</Project>
