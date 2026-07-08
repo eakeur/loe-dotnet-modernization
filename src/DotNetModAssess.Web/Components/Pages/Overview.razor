@@ -1,0 +1,120 @@
+@page "/"
+@inject SolutionStateService State
+@implements IDisposable
+
+<PageTitle>Solution Overview</PageTitle>
+
+<h1>Solution Overview</h1>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <h5 class="card-title">Load a solution</h5>
+        <p class="text-muted">
+            The real Buildalyzer-backed parser is still being built in parallel. Until it lands,
+            loading always returns the checked-in fixture solution regardless of the path entered
+            below.
+        </p>
+        <div class="input-group" style="max-width: 640px;">
+            <input class="form-control" placeholder="e.g. C:\src\MyApp\MyApp.sln"
+                   @bind="_solutionPath" @bind:event="oninput" disabled="@State.IsLoading" />
+            <button class="btn btn-primary" @onclick="LoadAsync" disabled="@State.IsLoading">
+                @(State.IsLoading ? "Loading..." : "Load solution")
+            </button>
+        </div>
+        @if (State.IsLoading)
+        {
+            <div class="mt-2 text-muted">
+                <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                @State.LoadingStageMessage
+            </div>
+        }
+        @if (State.LastError is not null)
+        {
+            <div class="alert alert-danger mt-3 mb-0">Failed to load: @State.LastError</div>
+        }
+    </div>
+</div>
+
+@if (State.Solution is null)
+{
+    <p class="text-muted">No solution loaded yet. Click "Load solution" above to load the sample fixture.</p>
+}
+else
+{
+    var solution = State.Solution;
+    var projects = solution.Projects;
+    var sdkCount = projects.Count(p => p.Format == ProjectFormat.SdkStyle);
+    var legacyCount = projects.Count(p => p.Format == ProjectFormat.LegacyStyle);
+    var packagesConfigCount = projects.Count(p => p.Metadata.PackagesModel == PackagesModel.PackagesConfig);
+    var tfmBreakdown = projects
+        .Select(p => string.IsNullOrWhiteSpace(p.Metadata.TargetFrameworkRaw) ? "(unknown)" : p.Metadata.TargetFrameworkRaw)
+        .GroupBy(tfm => tfm)
+        .OrderByDescending(g => g.Count())
+        .ThenBy(g => g.Key)
+        .ToList();
+
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div class="card text-center h-100">
+                <div class="card-body">
+                    <div class="display-6">@projects.Count</div>
+                    <div class="text-muted">Projects</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center h-100">
+                <div class="card-body">
+                    <div class="display-6">@sdkCount / @legacyCount</div>
+                    <div class="text-muted">SDK-style / Legacy-style</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center h-100">
+                <div class="card-body">
+                    <div class="display-6">@packagesConfigCount</div>
+                    <div class="text-muted">Still on packages.config</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center h-100">
+                <div class="card-body">
+                    <div class="display-6">@solution.NuGetSources.Count</div>
+                    <div class="text-muted">NuGet sources</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header">Target framework breakdown</div>
+        <ul class="list-group list-group-flush">
+            @foreach (var group in tfmBreakdown)
+            {
+                <li class="list-group-item d-flex justify-content-between align-items-center">
+                    <span>@group.Key</span>
+                    <span class="badge bg-secondary rounded-pill">@group.Count()</span>
+                </li>
+            }
+        </ul>
+    </div>
+
+    <p><a class="btn btn-outline-primary" href="/projects">Browse all projects &rarr;</a></p>
+}
+
+@code {
+    private string _solutionPath = "";
+
+    protected override void OnInitialized()
+    {
+        State.Changed += OnStateChanged;
+    }
+
+    private async Task LoadAsync() => await State.LoadSolutionAsync(_solutionPath);
+
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => State.Changed -= OnStateChanged;
+}

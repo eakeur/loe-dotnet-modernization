@@ -1,0 +1,307 @@
+@page "/projects/{*ProjectPath}"
+@inject SolutionStateService State
+
+<PageTitle>@(_project?.Name ?? "Project") - Project Detail</PageTitle>
+
+@if (State.Solution is null)
+{
+    <p class="text-muted">No solution loaded yet. <a href="/">Go load one</a>.</p>
+}
+else if (_project is null)
+{
+    <div class="alert alert-warning">
+        No project found for path <code>@ProjectPath</code>. <a href="/projects">Back to project list</a>.
+    </div>
+}
+else
+{
+    <p><a href="/projects">&larr; Back to project list</a></p>
+    <h1>@_project.Name</h1>
+    <p class="text-muted">
+        <code>@_project.Path</code>
+        <span class="badge @(_project.Format == ProjectFormat.LegacyStyle ? "bg-warning text-dark" : "bg-success") ms-2">@_project.Format</span>
+        <span class="badge bg-secondary ms-1">@_project.Metadata.TargetFrameworkRaw</span>
+        <span class="badge bg-secondary ms-1">@_project.OutputType</span>
+    </p>
+
+    <ul class="nav nav-tabs mb-3">
+        <li class="nav-item">
+            <button class="nav-link @(_activeTab == Tab.Dependencies ? "active" : "")" @onclick='() => _activeTab = Tab.Dependencies'>Dependencies</button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link @(_activeTab == Tab.Packages ? "active" : "")" @onclick='() => _activeTab = Tab.Packages'>Packages</button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link @(_activeTab == Tab.Metadata ? "active" : "")" @onclick='() => _activeTab = Tab.Metadata'>Metadata</button>
+        </li>
+    </ul>
+
+    @if (_activeTab == Tab.Dependencies)
+    {
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card mb-3">
+                    <div class="card-header">Depends on (@_project.ProjectReferences.Count)</div>
+                    @if (_project.ProjectReferences.Count == 0)
+                    {
+                        <div class="card-body text-muted">No project references.</div>
+                    }
+                    else
+                    {
+                        <ul class="list-group list-group-flush">
+                            @foreach (var reference in _project.ProjectReferences)
+                            {
+                                <li class="list-group-item">
+                                    <a href="@($"/projects/{reference.Path}")">@reference.Name</a>
+                                    <div class="text-muted small"><code>@reference.Path</code></div>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card mb-3">
+                    <div class="card-header">Used by / dependents (@_dependents.Count)</div>
+                    @if (_dependents.Count == 0)
+                    {
+                        <div class="card-body text-muted">No other project references this one.</div>
+                    }
+                    else
+                    {
+                        <ul class="list-group list-group-flush">
+                            @foreach (var dependent in _dependents)
+                            {
+                                <li class="list-group-item">
+                                    <a href="@($"/projects/{dependent.Path}")">@dependent.Name</a>
+                                    <div class="text-muted small"><code>@dependent.Path</code></div>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+    else if (_activeTab == Tab.Packages)
+    {
+        @if (_project.PackageReferences.Count == 0)
+        {
+            <p class="text-muted">No package references.</p>
+        }
+        else
+        {
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Package</th>
+                        <th>Requested</th>
+                        <th>Resolved</th>
+                        <th>Centrally managed</th>
+                        <th>Floating</th>
+                        <th>Version conflict</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var package in _project.PackageReferences)
+                    {
+                        var conflict = GetPackageConflict(package.PackageId);
+                        <tr>
+                            <td>@package.PackageId</td>
+                            <td>@(package.RequestedVersion ?? "-")</td>
+                            <td>@(package.ResolvedVersion ?? "-")</td>
+                            <td>@(package.IsCentrallyManaged ? "Yes" : "No")</td>
+                            <td>@(package.IsFloatingVersion ? "Yes" : "No")</td>
+                            <td>
+                                @if (conflict is not null)
+                                {
+                                    <span class="badge bg-danger" title="@string.Join(", ", conflict.Package.ProjectVersions.Select(v => $"{v.ProjectPath}: {v.Version}"))">
+                                        Conflict (@string.Join(", ", conflict.Package.ProjectVersions.Select(v => v.Version).Distinct()))
+                                    </span>
+                                }
+                                else
+                                {
+                                    <span class="text-muted">-</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    }
+    else if (_activeTab == Tab.Metadata)
+    {
+        var metadata = _project.Metadata;
+        <div class="card mb-3">
+            <div class="card-header">Summary</div>
+            <div class="card-body">
+                <dl class="row mb-0">
+                    <dt class="col-sm-3">Format</dt><dd class="col-sm-9">@metadata.Format</dd>
+                    <dt class="col-sm-3">Packages model</dt><dd class="col-sm-9">@metadata.PackagesModel</dd>
+                    <dt class="col-sm-3">Centrally managed</dt><dd class="col-sm-9">@metadata.IsCentrallyManaged</dd>
+                    <dt class="col-sm-3">Target framework (raw)</dt><dd class="col-sm-9">@metadata.TargetFrameworkRaw</dd>
+                    <dt class="col-sm-3">Target framework classification</dt><dd class="col-sm-9">@metadata.TargetFrameworkClassification</dd>
+                    <dt class="col-sm-3">Output type</dt><dd class="col-sm-9">@metadata.OutputType</dd>
+                    <dt class="col-sm-3">Project type GUIDs</dt><dd class="col-sm-9">@(metadata.ProjectTypeGuids.Count == 0 ? "-" : string.Join(", ", metadata.ProjectTypeGuids))</dd>
+                    <dt class="col-sm-3">LangVersion</dt><dd class="col-sm-9">@(metadata.LangVersion ?? "-")</dd>
+                    <dt class="col-sm-3">Nullable</dt><dd class="col-sm-9">@(metadata.Nullable ?? "-")</dd>
+                    <dt class="col-sm-3">ImplicitUsings</dt><dd class="col-sm-9">@(metadata.ImplicitUsings?.ToString() ?? "-")</dd>
+                    <dt class="col-sm-3">AllowUnsafeBlocks</dt><dd class="col-sm-9">@(metadata.AllowUnsafeBlocks?.ToString() ?? "-")</dd>
+                    <dt class="col-sm-3">TreatWarningsAsErrors</dt><dd class="col-sm-9">@(metadata.TreatWarningsAsErrors?.ToString() ?? "-")</dd>
+                    <dt class="col-sm-3">DefineConstants</dt><dd class="col-sm-9">@(metadata.DefineConstants.Count == 0 ? "-" : string.Join(", ", metadata.DefineConstants))</dd>
+                    <dt class="col-sm-3">AssemblyName</dt><dd class="col-sm-9">@(metadata.AssemblyName ?? "-")</dd>
+                    <dt class="col-sm-3">RootNamespace</dt><dd class="col-sm-9">@(metadata.RootNamespace ?? "-")</dd>
+                    <dt class="col-sm-3">RuntimeIdentifiers</dt><dd class="col-sm-9">@(metadata.RuntimeIdentifiers.Count == 0 ? "-" : string.Join(", ", metadata.RuntimeIdentifiers))</dd>
+                    <dt class="col-sm-3">PlatformTarget</dt><dd class="col-sm-9">@(metadata.PlatformTarget ?? "-")</dd>
+                    <dt class="col-sm-3">UseWindowsForms / UseWpf</dt><dd class="col-sm-9">@metadata.UseWindowsForms / @metadata.UseWpf</dd>
+                    <dt class="col-sm-3">IsPackable</dt><dd class="col-sm-9">@(metadata.IsPackable?.ToString() ?? "-")</dd>
+                    <dt class="col-sm-3">IsTestProject</dt><dd class="col-sm-9">@metadata.IsTestProject @(metadata.TestFramework is not null ? $"({metadata.TestFramework})" : "")</dd>
+                    <dt class="col-sm-3">Directory.Build.props chain</dt><dd class="col-sm-9">@(metadata.DirectoryBuildPropsChain.Count == 0 ? "-" : string.Join(" -> ", metadata.DirectoryBuildPropsChain))</dd>
+                    <dt class="col-sm-3">Directory.Build.targets chain</dt><dd class="col-sm-9">@(metadata.DirectoryBuildTargetsChain.Count == 0 ? "-" : string.Join(" -> ", metadata.DirectoryBuildTargetsChain))</dd>
+                    <dt class="col-sm-3">Custom targets/imports</dt>
+                    <dd class="col-sm-9">
+                        @(metadata.CustomTargetsAndImports.Count == 0
+                            ? "-"
+                            : string.Join(", ", metadata.CustomTargetsAndImports.Select(c => $"{c.ElementType}:{c.Name}")))
+                    </dd>
+                </dl>
+            </div>
+        </div>
+
+        <div class="card mb-3">
+            <div class="card-header">Legacy coupling signals</div>
+            <div class="card-body">
+                <dl class="row mb-0">
+                    <dt class="col-sm-3">References System.Web</dt><dd class="col-sm-9">@metadata.LegacySignals.ReferencesSystemWeb</dd>
+                    <dt class="col-sm-3">References System.ServiceModel</dt><dd class="col-sm-9">@metadata.LegacySignals.ReferencesSystemServiceModel</dd>
+                    <dt class="col-sm-3">References System.Messaging</dt><dd class="col-sm-9">@metadata.LegacySignals.ReferencesSystemMessaging</dd>
+                    <dt class="col-sm-3">COM references</dt><dd class="col-sm-9">@(metadata.LegacySignals.ComReferences.Count == 0 ? "-" : string.Join(", ", metadata.LegacySignals.ComReferences))</dd>
+                    <dt class="col-sm-3">P/Invoke signals</dt><dd class="col-sm-9">@metadata.LegacySignals.HasPInvokeSignals</dd>
+                    <dt class="col-sm-3">app.config present</dt><dd class="col-sm-9">@metadata.LegacySignals.HasAppConfig</dd>
+                    <dt class="col-sm-3">web.config present</dt><dd class="col-sm-9">@metadata.LegacySignals.HasWebConfig</dd>
+                    <dt class="col-sm-3">web.config transforms</dt><dd class="col-sm-9">@metadata.LegacySignals.HasWebConfigTransforms</dd>
+                    <dt class="col-sm-3">Uses ConfigurationManager</dt><dd class="col-sm-9">@metadata.LegacySignals.UsesConfigurationManager</dd>
+                    <dt class="col-sm-3">Legacy assembly references</dt><dd class="col-sm-9">@(metadata.LegacySignals.LegacyAssemblyReferences.Count == 0 ? "-" : string.Join(", ", metadata.LegacySignals.LegacyAssemblyReferences))</dd>
+                    <dt class="col-sm-3">Windows-only assembly references</dt><dd class="col-sm-9">@(metadata.LegacySignals.WindowsOnlyAssemblyReferences.Count == 0 ? "-" : string.Join(", ", metadata.LegacySignals.WindowsOnlyAssemblyReferences))</dd>
+                </dl>
+            </div>
+        </div>
+
+        @if (metadata.Diagnostics.Count > 0)
+        {
+            <div class="card mb-3">
+                <div class="card-header">Evaluation diagnostics</div>
+                <ul class="list-group list-group-flush">
+                    @foreach (var diagnostic in metadata.Diagnostics)
+                    {
+                        <li class="list-group-item">
+                            <span class="badge @(diagnostic.Severity == EvaluationDiagnosticSeverity.Error ? "bg-danger" : "bg-warning text-dark") me-2">@diagnostic.Severity</span>
+                            <strong>@diagnostic.Code</strong>: @diagnostic.Message
+                            @if (diagnostic.File is not null)
+                            {
+                                <div class="text-muted small">@diagnostic.File@(diagnostic.LineNumber is not null ? $":{diagnostic.LineNumber}" : "")</div>
+                            }
+                        </li>
+                    }
+                </ul>
+            </div>
+        }
+
+        <div class="card">
+            <div class="card-header">
+                Raw MSBuild properties (@metadata.RawProperties.Count)
+                <input class="form-control form-control-sm mt-2" placeholder="Search properties..." @bind="_rawPropertySearch" @bind:event="oninput" />
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm table-striped mb-0">
+                    <thead>
+                        <tr><th>Property</th><th>Value</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var kvp in GetFilteredRawProperties(metadata))
+                        {
+                            <tr>
+                                <td><code>@kvp.Key</code></td>
+                                <td>@(kvp.Value ?? "(null)")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    [Parameter]
+    public string? ProjectPath { get; set; }
+
+    private ProjectModel? _project;
+    private List<ProjectModel> _dependents = [];
+    private Tab _activeTab = Tab.Dependencies;
+    private string _rawPropertySearch = "";
+
+    protected override void OnParametersSet()
+    {
+        _activeTab = Tab.Dependencies;
+        _rawPropertySearch = "";
+
+        if (State.Solution is null)
+        {
+            _project = null;
+            _dependents = [];
+            return;
+        }
+
+        _project = State.Solution.Projects.FirstOrDefault(p => p.Path == ProjectPath);
+        _dependents = FindDependents();
+    }
+
+    private List<ProjectModel> FindDependents()
+    {
+        if (_project is null || State.Graph is null || State.Solution is null)
+        {
+            return [];
+        }
+
+        var projectsByPath = State.Solution.Projects.ToDictionary(p => p.Path);
+
+        return State.Graph.Edges
+            .Where(e => e.Kind == GraphEdgeKind.ProjectToProject && e.ToId == _project.Path)
+            .Select(e => projectsByPath.GetValueOrDefault(e.FromId))
+            .Where(p => p is not null)
+            .Select(p => p!)
+            .ToList();
+    }
+
+    private PackageGraphNode? GetPackageConflict(string packageId)
+    {
+        var node = State.Graph?.Nodes
+            .OfType<PackageGraphNode>()
+            .FirstOrDefault(n => n.Package.PackageId == packageId);
+
+        return node?.Package.HasVersionConflict == true ? node : null;
+    }
+
+    private IEnumerable<KeyValuePair<string, string?>> GetFilteredRawProperties(ProjectMetadata metadata)
+    {
+        if (string.IsNullOrWhiteSpace(_rawPropertySearch))
+        {
+            return metadata.RawProperties.OrderBy(kvp => kvp.Key);
+        }
+
+        return metadata.RawProperties
+            .Where(kvp =>
+                kvp.Key.Contains(_rawPropertySearch, StringComparison.OrdinalIgnoreCase) ||
+                (kvp.Value?.Contains(_rawPropertySearch, StringComparison.OrdinalIgnoreCase) ?? false))
+            .OrderBy(kvp => kvp.Key);
+    }
+
+    private enum Tab
+    {
+        Dependencies,
+        Packages,
+        Metadata
+    }
+}
