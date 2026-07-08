@@ -24,4 +24,13 @@
     <ProjectReference Include="..\..\src\DotNetModAssess.Core\DotNetModAssess.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- UsageScanningFixtures/**/*.cs are inputs the RoslynUsageScanner tests feed to
+         CSharpSyntaxTree.ParseText, not code compiled into this test assembly (some
+         intentionally reference types that don't really exist, e.g. fully-qualified
+         names used purely to exercise syntax-level matching). -->
+    <Compile Remove="UsageScanningFixtures\**\*.cs" />
+    <None Include="UsageScanningFixtures\**\*.cs" />
+  </ItemGroup>
+
 </Project>
