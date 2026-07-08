@@ -1,10 +1,17 @@
+using DotNetModAssess.Core.Parsing;
 using DotNetModAssess.Web.Components;
+using DotNetModAssess.Web.Parsing;
+using DotNetModAssess.Web.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
+
+// Fixture-backed parser + per-circuit solution state (see SolutionStateService for why Scoped).
+builder.Services.AddScoped<ISolutionParser, FixtureBackedSolutionParser>();
+builder.Services.AddScoped<SolutionStateService>();
 
 var app = builder.Build();
 
