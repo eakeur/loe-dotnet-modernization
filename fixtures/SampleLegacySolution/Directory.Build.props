@@ -1,0 +1,8 @@
+<Project>
+
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <SampleFixtureMarker>true</SampleFixtureMarker>
+  </PropertyGroup>
+
+</Project>

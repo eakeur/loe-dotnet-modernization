@@ -7,10 +7,30 @@
 
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+
+    <!-- The VSTest test host (Microsoft.TestPlatform.ObjectModel, from Microsoft.NET.Test.Sdk)
+         needs its own copy of NuGet.Frameworks present in the output directory to even start up,
+         which conflicts with Microsoft.Build.Locator's MSBL001 check wanting it excluded here. We
+         still exclude the packages that actually matter for MSBuild assembly-loading correctness
+         at runtime (Microsoft.Build.* / Microsoft.NET.StringTools, below) and disable the check
+         itself so it stops flagging the (intentionally un-excluded) NuGet.Frameworks reference. -->
+    <DisableMSBuildAssemblyCopyCheck>true</DisableMSBuildAssemblyCopyCheck>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.0" />
+    <!-- These MSBuild-family overrides mirror the ones in DotNetModAssess.Core.csproj. They are
+         required (not just in Core) because Microsoft.Build.Locator's MSBL001 check inspects each
+         project's own resolved dependency graph independently: Buildalyzer/Microsoft.Build.Locator
+         flow into this test project transitively, and their own un-excluded dependency edges on
+         these packages would otherwise cause mismatched MSBuild assemblies to be copied to this
+         project's output, which can break assembly-loading once MSBuildLocator.RegisterDefaults()
+         (called from Core) redirects loads to the installed SDK's own copies at runtime. -->
+    <PackageReference Include="Microsoft.Build" Version="17.14.28" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Build.Framework" Version="17.14.28" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Build.Tasks.Core" Version="17.14.28" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Build.Utilities.Core" Version="17.14.28" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.NET.StringTools" Version="17.14.28" ExcludeAssets="runtime" PrivateAssets="all" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
     <PackageReference Include="xunit" Version="2.5.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />

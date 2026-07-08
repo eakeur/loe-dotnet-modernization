@@ -1,0 +1,8 @@
+{
+  "solution": {
+    "path": "SampleLegacySolution.sln",
+    "projects": [
+      "Modern.Sdk\\Modern.Sdk.csproj"
+    ]
+  }
+}
