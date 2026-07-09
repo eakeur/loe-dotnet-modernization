@@ -1,0 +1,42 @@
+.vsc-statusbar {
+    flex: 0 0 auto;
+    height: 22px;
+    background: var(--vsc-statusbar-bg);
+    color: var(--vsc-statusbar-fg);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 10px;
+    font-size: 12px;
+}
+
+.vsc-statusbar-left,
+.vsc-statusbar-right {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    overflow: hidden;
+}
+
+.vsc-statusbar-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+}
+
+.vsc-statusbar-link {
+    color: var(--vsc-statusbar-fg);
+    cursor: pointer;
+}
+
+.vsc-statusbar-link:hover {
+    background: rgba(255, 255, 255, 0.15);
+    text-decoration: none;
+}
+
+.vsc-statusbar-error {
+    color: #ffd8d8;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}

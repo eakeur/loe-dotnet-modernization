@@ -1,0 +1,121 @@
+@page "/"
+@inject SolutionStateService State
+@inject IRecentWorkspacesStore RecentWorkspaces
+@inject NavigationManager Nav
+@implements IDisposable
+
+<PageTitle>DotNetModAssess</PageTitle>
+
+@* The landing screen, modeled on VS Code's own Start/Welcome page: an "Open" action plus a
+   "Recent" list of previously-opened workspaces, shown only while no solution is loaded - the
+   moment one is, this page hands off to the persistent workspace shell at /workspace. *@
+<div class="vsc-landing">
+    <div class="vsc-landing-hero">
+        <h1>DotNetModAssess</h1>
+        <p class="vsc-muted">Assess a .NET solution for modernizing to run on Linux containers.</p>
+    </div>
+
+    <div class="vsc-landing-columns">
+        <section class="vsc-landing-section">
+            <h2>Open</h2>
+            <p class="vsc-muted vsc-small">
+                Enter the path to a <code>.sln</code> or <code>.slnf</code> file. Try the bundled sample
+                fixture at <code>fixtures/SampleLegacySolution/SampleLegacySolution.sln</code>
+                (repo-root-relative) to see a mixed legacy/SDK-style solution end to end.
+            </p>
+            <div class="vsc-landing-open-row">
+                <input class="vsc-input" placeholder="e.g. /src/MyApp/MyApp.sln"
+                       @bind="_solutionPath" @bind:event="oninput" disabled="@State.IsLoading"
+                       @onkeydown="OnKeyDown" />
+                <button class="vsc-btn" @onclick="LoadAsync" disabled="@(State.IsLoading || string.IsNullOrWhiteSpace(_solutionPath))">
+                    @(State.IsLoading ? "Opening..." : "Open")
+                </button>
+            </div>
+            @if (State.IsLoading)
+            {
+                <div class="vsc-alert vsc-alert-info"><span class="vsc-spinner"></span>@State.LoadingStageMessage</div>
+            }
+            @if (State.LastError is not null)
+            {
+                <div class="vsc-alert vsc-alert-error">Failed to open: @State.LastError</div>
+            }
+        </section>
+
+        <section class="vsc-landing-section">
+            <h2>Recent</h2>
+            @if (_recent.Count == 0)
+            {
+                <p class="vsc-muted vsc-small">Nothing opened yet - solutions you open will show up here for next time.</p>
+            }
+            else
+            {
+                <ul class="vsc-recent-list">
+                    @foreach (var entry in _recent)
+                    {
+                        <li>
+                            <button class="vsc-recent-item" disabled="@State.IsLoading" @onclick="() => OpenRecentAsync(entry.Path)">
+                                <span class="vsc-recent-name">@entry.DisplayName</span>
+                                <span class="vsc-recent-path vsc-mono">@entry.Path</span>
+                            </button>
+                        </li>
+                    }
+                </ul>
+            }
+        </section>
+    </div>
+</div>
+
+@code {
+    private string _solutionPath = "";
+    private IReadOnlyList<RecentWorkspaceEntry> _recent = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.Changed += OnStateChanged;
+        await RefreshRecentAsync();
+
+        if (State.Solution is not null)
+        {
+            Nav.NavigateTo("/workspace");
+        }
+    }
+
+    private async Task RefreshRecentAsync()
+    {
+        _recent = await RecentWorkspaces.GetRecentAsync();
+    }
+
+    private void OnStateChanged() =>
+        InvokeAsync(() =>
+        {
+            if (State.Solution is not null)
+            {
+                Nav.NavigateTo("/workspace");
+                return;
+            }
+
+            StateHasChanged();
+        });
+
+    private async Task LoadAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_solutionPath))
+        {
+            return;
+        }
+
+        await State.LoadSolutionAsync(_solutionPath);
+    }
+
+    private async Task OpenRecentAsync(string path) => await State.LoadSolutionAsync(path);
+
+    private async Task OnKeyDown(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await LoadAsync();
+        }
+    }
+
+    public void Dispose() => State.Changed -= OnStateChanged;
+}

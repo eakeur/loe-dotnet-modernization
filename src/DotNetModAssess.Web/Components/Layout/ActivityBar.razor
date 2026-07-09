@@ -1,0 +1,63 @@
+@* VS Code's "Activity Bar": the thin far-left icon rail for switching between top-level views.
+   We only have three meaningful destinations today (the persistent Explorer tree lives in the
+   Side Bar and never goes away - see SideBar.razor - Search and Findings are full main-panel
+   routes), plus a bottom "close workspace" action back to the recent-workspaces landing screen. *@
+@inject NavigationManager Nav
+@implements IDisposable
+
+<nav class="vsc-activitybar" aria-label="Activity Bar">
+    <div class="vsc-activitybar-top">
+        <a class="vsc-activitybar-item @(IsActive("/workspace") ? "active" : "")" href="/workspace" title="Explorer">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 4h6l2 2h10v13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4z"/></svg>
+        </a>
+        <a class="vsc-activitybar-item @(IsActive("/workspace/search") ? "active" : "")" href="/workspace/search" title="Search">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="10.5" cy="10.5" r="6.5"/><line x1="21" y1="21" x2="15.5" y2="15.5"/></svg>
+        </a>
+        <a class="vsc-activitybar-item @(IsActive("/workspace/findings") ? "active" : "")" href="/workspace/findings" title="Findings">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l9 16H3l9-16z"/><line x1="12" y1="10" x2="12" y2="14"/><circle cx="12" cy="17" r="0.6" fill="currentColor"/></svg>
+            @if (FindingsCount > 0)
+            {
+                <span class="vsc-activitybar-badge">@(FindingsCount > 99 ? "99+" : FindingsCount.ToString())</span>
+            }
+        </a>
+    </div>
+    <div class="vsc-activitybar-bottom">
+        <button class="vsc-activitybar-item" title="Close workspace" @onclick="CloseWorkspace">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 4H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h4"/><line x1="21" y1="12" x2="10" y2="12"/><path d="M17 8l4 4-4 4"/></svg>
+        </button>
+    </div>
+</nav>
+
+@code {
+    [Inject]
+    private SolutionStateService State { get; set; } = default!;
+
+    private int FindingsCount => State.LegacyFindings?.Count ?? 0;
+
+    protected override void OnInitialized()
+    {
+        Nav.LocationChanged += OnLocationChanged;
+        State.Changed += OnStateChanged;
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e) =>
+        InvokeAsync(StateHasChanged);
+
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
+    private bool IsActive(string path) =>
+        Nav.ToBaseRelativePath(Nav.Uri).Equals(path.TrimStart('/'), StringComparison.OrdinalIgnoreCase) ||
+        Nav.ToBaseRelativePath(Nav.Uri).StartsWith(path.TrimStart('/') + "/", StringComparison.OrdinalIgnoreCase);
+
+    private void CloseWorkspace()
+    {
+        State.CloseSolution();
+        Nav.NavigateTo("/");
+    }
+
+    public void Dispose()
+    {
+        Nav.LocationChanged -= OnLocationChanged;
+        State.Changed -= OnStateChanged;
+    }
+}
