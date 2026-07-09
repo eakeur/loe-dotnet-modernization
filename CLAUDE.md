@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-DotNetModAssess is a Blazor Server app that ingests a legacy .NET solution (a mix of .NET Framework and SDK-style projects) and helps an assessor evaluate modernizing it to run on modern .NET / Linux containers. It parses the solution via real MSBuild evaluation, builds a dependency graph, scans source for project/package usage and known legacy-API patterns (WCF, WPF, ConfigurationManager, AppDomain, COM interop), and checks NuGet packages for .NET 8-compatible versions.
+DotNetModAssess ingests a legacy .NET solution (a mix of .NET Framework and SDK-style projects) and helps assess modernizing it to run on modern .NET / Linux containers. It parses the solution via real MSBuild evaluation, builds a dependency graph, scans source for project/package usage and known legacy-API patterns (WCF, WPF, ConfigurationManager, AppDomain, COM interop), and checks NuGet packages for .NET 8-compatible versions. All of that logic lives in `DotNetModAssess.Core`; there are two independent, UI-agnostic consumers of it: a Blazor Server web UI (`DotNetModAssess.Web`) for a human assessor, and an MCP (Model Context Protocol) stdio server (`DotNetModAssess.Mcp`) exposing the same findings as tools for an AI coding agent.
 
 The app is **designed to run on Windows** (full-fidelity MSBuild evaluation of legacy non-SDK-style projects is most reliable against the Windows MSBuild/VS Build Tools toolchain), but is developed cross-platform. On a non-Windows dev machine, evaluation of a legacy net48-style project may gracefully report `ProjectEvaluationStatus.Failed` rather than fully succeeding — this is expected and handled by design, not a bug to fix. Tests that exercise this are written to tolerate either outcome.
 
@@ -15,8 +15,10 @@ DotNetModAssess.sln
 src/
   DotNetModAssess.Core/    classlib, net8.0 — all parsing/graph/analysis logic
   DotNetModAssess.Web/     Blazor Server (net8.0), consumes Core
+  DotNetModAssess.Mcp/     console app, net8.0, MCP stdio server, consumes Core
 tests/
   DotNetModAssess.Core.Tests/   xUnit
+  DotNetModAssess.Mcp.Tests/    xUnit
 fixtures/
   SampleLegacySolution/         real, hand-built solution (legacy net48 + SDK-style + packages.config +
                                  CPM) used for integration tests of the real parser
@@ -37,6 +39,10 @@ dotnet test --filter "FullyQualifiedName~RoslynUsageScannerTests.ScanAsync_Detec
 
 # run the web app
 dotnet run --project src/DotNetModAssess.Web
+
+# run the MCP server directly (normally launched by an MCP client instead, e.g. Claude Code's
+# .mcp.json - the path argument is required, not optional)
+dotnet run --project src/DotNetModAssess.Mcp -- /path/to/MySolution.sln
 ```
 
 The SDK is pinned via `global.json` (8.0.402) — run `dotnet --list-sdks` if a build fails for an SDK-mismatch reason.
@@ -82,6 +88,14 @@ Scoped per Blazor circuit (one per connected browser tab, so different assessors
 ### Web UI is a VS Code-style workbench, not a set of independent pages
 
 `MainLayout.razor` renders a persistent shell — `ActivityBar` (far-left icon strip: Explorer/Search/Findings, the last badge-counted from `LegacyFindings`) + `SideBar` (filterable project/package tree, stays mounted across navigation) + `StatusBar`, wrapping `@Body`. Routes under `/workspace/...` (`/workspace`, `/workspace/project/{*ProjectPath}`, `/workspace/package/{*PackageId}`, `/workspace/findings`, `/workspace/search`, `/workspace/file`, `/workspace/graph`) swap the main-panel content inside that shell; `/` is the landing/recent-workspaces screen shown when no solution is loaded. Project/package detail panels can show the dependency graph *rooted at that node* by passing `DependencyGraphView`'s `InitialFocusNodeId` parameter, which reuses the exact same click-to-focus highlight logic (`OnNodeClicked`) a real click would trigger, rather than duplicating it. The read-only code viewer (`Workspace/FileViewer.razor`) drives the Monaco Editor (loaded via pinned CDN script in `App.razor`, same pattern as Cytoscape.js) through `wwwroot/js/codeViewer.js`.
+
+### `DotNetModAssess.Mcp` is a third thin presentation layer, not a rearchitecture
+
+Same relationship to Core as the Web project - a new consumer, zero changes to Core's contracts. Registers every Core service as **Singleton** (not Scoped like Web's per-circuit registrations): the process serves exactly one loaded workspace for its whole lifetime by design, there's no "per connection" concept to scope to. The solution/filter/project path is a **required command-line argument** (`args[0]`), not a tool parameter - set once in the MCP client's config (e.g. Claude Code's `.mcp.json`), not chosen interactively by the agent.
+
+The one requirement that shapes everything else here: an LLM calling a tool must never block on a multi-minute solution parse as part of its own turn. `Program.cs` fires `McpWorkspaceState.StartAsync(path)` as a background `Task` *before* `host.RunAsync()` starts the MCP protocol loop, so the `initialize` handshake is always instant regardless of solution size. Every data-returning tool `await`s `McpWorkspaceState.LoadingTask` internally - if a tool is called after loading already finished (the common case, given real wall-clock time passes between "server starts" and "agent calls a tool"), it returns instantly; if called too early, it transparently waits and then returns correct data, with no retry logic needed on the agent's side. `get_load_status` is the sole exception - it never awaits, so an agent can poll real progress (reusing the exact same `IProgress<string>` plumbing described above) instead of blindly waiting on a data tool. `McpWorkspaceState` is otherwise a process-wide cousin of `SolutionStateService` (same eager usage/legacy-pattern scan, same lazy `Graph`, same debounced `FileSystemWatcher` live-reload) with no Blazor `Changed` event to raise.
+
+Tool methods return small DTOs local to the Mcp project (`Dtos/`), never Core domain types directly - same reasoning as `DependencyGraphView.razor`'s `GraphNodeDto`/`GraphEdgeDto` projection for JS interop, just for MCP's JSON-RPC serialization instead.
 
 ### Fixtures: two different strategies for two different needs
 
