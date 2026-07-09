@@ -48,6 +48,17 @@ namespace DotNetModAssess.Core.UsageScanning;
 /// namespace "Serilog", not "Serilog.AspNetCore"). Building a real NuGet-content-aware
 /// namespace resolver is out of scope for v1 per the module spec.</item>
 /// </list>
+///
+/// <para>
+/// SECOND PASS: to improve recall on the limitations above without building a semantic-model
+/// resolver, <see cref="ScanAsync"/> unions this Roslyn syntax pass with an independent
+/// <see cref="TextSearchUsageScanner"/> pass - a plain word-boundary text search for the same
+/// <see cref="UsageTarget"/> names across a broader file set (not just ".cs"). Roslyn-syntax
+/// matches are tagged <see cref="UsageConfidence.Confirmed"/>; anything only the text pass found
+/// is tagged <see cref="UsageConfidence.TextMatch"/> and de-duplicated against this pass's results
+/// by (FilePath, LineNumber, MatchedSymbol) so the same physical occurrence is never reported
+/// twice. See <see cref="TextSearchUsageScanner"/> for that pass's own scope and limitations.
+/// </para>
 /// </summary>
 public sealed class RoslynUsageScanner : IUsageScanner
 {
@@ -56,15 +67,13 @@ public sealed class RoslynUsageScanner : IUsageScanner
         ArgumentNullException.ThrowIfNull(solution);
 
         var targets = BuildTargets(solution);
-        var results = new List<UsageResult>();
+        var confirmedResults = new List<UsageResult>();
 
         foreach (var project in solution.Projects)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var projectTargets = targets
-                .Where(t => t.OwningProjectPath is null || !PathsEqual(t.OwningProjectPath, project.Path))
-                .ToList();
+            var projectTargets = GetTargetsForProject(targets, project);
 
             if (projectTargets.Count == 0)
             {
@@ -75,23 +84,45 @@ public sealed class RoslynUsageScanner : IUsageScanner
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var fileResults = await ScanFileAsync(file, project, projectTargets, cancellationToken).ConfigureAwait(false);
-                results.AddRange(fileResults);
+                confirmedResults.AddRange(fileResults);
             }
         }
 
-        return results
+        var orderedConfirmed = confirmedResults
             .OrderBy(r => r.FilePath, StringComparer.Ordinal)
             .ThenBy(r => r.LineNumber)
             .ThenBy(r => r.MatchedSymbol, StringComparer.Ordinal)
             .ToList();
+
+        var textMatchResults = await TextSearchUsageScanner.ScanAsync(solution, targets, orderedConfirmed, cancellationToken)
+            .ConfigureAwait(false);
+
+        // Ordering convention: every Confirmed (Roslyn) result first, in that pass's own sort
+        // order, followed by every TextMatch result, in its own sort order. This keeps the
+        // highest-confidence results first without interleaving the two passes.
+        var combined = new List<UsageResult>(orderedConfirmed.Count + textMatchResults.Count);
+        combined.AddRange(orderedConfirmed);
+        combined.AddRange(textMatchResults);
+        return combined;
     }
 
     /// <summary>A single thing whose usage we're looking for: a project's approximate root
     /// namespace, or a package id. <paramref name="OwningProjectPath"/> is non-null only for
-    /// project targets, and is used to avoid a project reporting "usage" of its own namespace.</summary>
-    private sealed record UsageTarget(string Name, string? OwningProjectPath);
+    /// project targets, and is used to avoid a project reporting "usage" of its own namespace.
+    /// Internal (rather than private) so <see cref="TextSearchUsageScanner"/> can search for the
+    /// exact same set of targets as this pass, per the module's design.</summary>
+    internal sealed record UsageTarget(string Name, string? OwningProjectPath);
 
-    private static IReadOnlyList<UsageTarget> BuildTargets(SolutionModel solution)
+    /// <summary>The subset of <paramref name="targets"/> that a given <paramref name="project"/>
+    /// should be scanned against - i.e. every target except the project's own namespace (a
+    /// project doesn't "use" itself). Shared by both the Roslyn pass and
+    /// <see cref="TextSearchUsageScanner"/> so they agree on what counts as a self-reference.</summary>
+    internal static IReadOnlyList<UsageTarget> GetTargetsForProject(IReadOnlyList<UsageTarget> targets, ProjectModel project) =>
+        targets
+            .Where(t => t.OwningProjectPath is null || !PathsEqual(t.OwningProjectPath, project.Path))
+            .ToList();
+
+    internal static IReadOnlyList<UsageTarget> BuildTargets(SolutionModel solution)
     {
         var targets = new List<UsageTarget>();
 
@@ -136,6 +167,24 @@ public sealed class RoslynUsageScanner : IUsageScanner
 
         return Directory.EnumerateFiles(projectDir, "*.cs", SearchOption.AllDirectories)
             .Where(f => !IsUnderExcludedDirectory(f))
+            .OrderBy(f => f, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    /// <summary>Walks a project's directory (same "bin"/"obj" exclusion convention as
+    /// <see cref="EnumerateSourceFiles"/>) for files matching any of <paramref name="extensions"/>.
+    /// Used by <see cref="TextSearchUsageScanner"/> to search a broader file set than the Roslyn
+    /// pass's ".cs"-only scan (".razor", ".cshtml", ".config", ".json", ".xml", ...).</summary>
+    internal static IReadOnlyList<string> EnumerateFilesForTextSearch(ProjectModel project, IReadOnlyCollection<string> extensions)
+    {
+        var projectDir = TryGetProjectDirectory(project.Path);
+        if (projectDir is null || !Directory.Exists(projectDir))
+        {
+            return [];
+        }
+
+        return Directory.EnumerateFiles(projectDir, "*.*", SearchOption.AllDirectories)
+            .Where(f => !IsUnderExcludedDirectory(f) && extensions.Contains(Path.GetExtension(f), StringComparer.OrdinalIgnoreCase))
             .OrderBy(f => f, StringComparer.Ordinal)
             .ToList();
     }
