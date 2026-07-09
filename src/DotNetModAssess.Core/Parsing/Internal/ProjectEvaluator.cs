@@ -1,5 +1,6 @@
 using Buildalyzer;
 using Microsoft.Build.Framework;
+using Microsoft.Extensions.Logging;
 
 namespace DotNetModAssess.Core.Parsing.Internal;
 
@@ -26,7 +27,7 @@ internal sealed record ProjectEvaluationOutcome(
 /// </summary>
 internal static class ProjectEvaluator
 {
-    public static ProjectEvaluationOutcome Evaluate(IAnalyzerManager manager, string projectPath)
+    public static ProjectEvaluationOutcome Evaluate(IAnalyzerManager manager, string projectPath, Microsoft.Extensions.Logging.ILogger? logger = null)
     {
         try
         {
@@ -39,11 +40,13 @@ internal static class ProjectEvaluator
 
             if (result is null)
             {
+                logger?.LogWarning("Buildalyzer produced no analyzer result for project {ProjectPath}", projectPath);
                 return new ProjectEvaluationOutcome(false, "Buildalyzer produced no analyzer result for this project.", null, buildEvents);
             }
 
             if (!result.Succeeded)
             {
+                logger?.LogWarning("MSBuild evaluation did not succeed for project {ProjectPath}", projectPath);
                 return new ProjectEvaluationOutcome(false, BuildFailureSummary(projectPath), result, buildEvents);
             }
 
@@ -51,6 +54,7 @@ internal static class ProjectEvaluator
         }
         catch (Exception ex)
         {
+            logger?.LogWarning(ex, "MSBuild evaluation threw for project {ProjectPath}", projectPath);
             return ProjectEvaluationOutcome.Empty($"MSBuild evaluation of '{projectPath}' failed: {ex.Message}");
         }
     }

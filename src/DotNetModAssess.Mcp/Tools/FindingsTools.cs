@@ -2,6 +2,8 @@ using System.ComponentModel;
 using DotNetModAssess.Core.Models;
 using DotNetModAssess.Mcp.Dtos;
 using DotNetModAssess.Mcp.Services;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using ModelContextProtocol.Server;
 
 namespace DotNetModAssess.Mcp.Tools;
@@ -21,10 +23,13 @@ public static class FindingsTools
         "modernization blockers and exactly where they live before proposing a migration plan.")]
     public static async Task<IReadOnlyList<UsageResultDto>> GetLegacyFindings(
         McpWorkspaceState state,
+        ILoggerFactory? loggerFactory = null,
         [Description("Optional exact pattern name to filter to (matches UsageResult.TargetName for a finding, e.g. \"WCF\", \"WPF\", \"ConfigurationManager\", \"AppDomain\", \"COM Interop\" - see get_solution_overview's LegacyFindingsByPattern for the exact names in use). Omit to return findings for all patterns.")]
         string? patternName = null,
         CancellationToken cancellationToken = default)
     {
+        var logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger("DotNetModAssess.Mcp.Tools.FindingsTools");
+        logger.LogDebug("Tool invoked: get_legacy_findings (patternName={PatternName})", patternName);
         await WorkspaceGuard.EnsureLoadedAsync(state, cancellationToken);
 
         IEnumerable<UsageResult> findings = state.LegacyFindings ?? [];

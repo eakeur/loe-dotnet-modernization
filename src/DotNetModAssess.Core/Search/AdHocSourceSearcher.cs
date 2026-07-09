@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using DotNetModAssess.Core.Models;
+using Microsoft.Extensions.Logging;
 
 namespace DotNetModAssess.Core.Search;
 
@@ -12,7 +13,7 @@ namespace DotNetModAssess.Core.Search;
 /// Every result is tagged <see cref="UsageConfidence.TextMatch"/> (it is, honestly, just a text
 /// search - nothing more) with <see cref="UsageResult.TargetName"/> set to the query itself.
 /// </summary>
-public sealed class AdHocSourceSearcher : IAdHocSourceSearcher
+public sealed class AdHocSourceSearcher(ILogger<AdHocSourceSearcher>? logger = null) : IAdHocSourceSearcher
 {
     /// <summary>Same broad set <c>TextSearchUsageScanner.SearchExtensions</c> covers - source plus
     /// the non-C# file kinds a plain text search can meaningfully look at.</summary>
@@ -24,6 +25,8 @@ public sealed class AdHocSourceSearcher : IAdHocSourceSearcher
         {
             return [];
         }
+
+        logger?.LogInformation("Starting ad-hoc source search for query {Query} across solution {SolutionPath}", query, solution.Path);
 
         var regex = BuildWordBoundaryRegex(query);
         var results = new List<UsageResult>();
@@ -46,10 +49,11 @@ public sealed class AdHocSourceSearcher : IAdHocSourceSearcher
                 {
                     lines = await File.ReadAllLinesAsync(file, cancellationToken).ConfigureAwait(false);
                 }
-                catch (IOException)
+                catch (IOException ex)
                 {
                     // Unreadable file (locked, deleted mid-search, etc.) - skip rather than fail
                     // the whole search over one file.
+                    logger?.LogWarning(ex, "Failed to read file {FilePath} during ad-hoc source search", file);
                     continue;
                 }
 
@@ -82,10 +86,14 @@ public sealed class AdHocSourceSearcher : IAdHocSourceSearcher
             }
         }
 
-        return results
+        var ordered = results
             .OrderBy(r => r.FilePath, StringComparer.Ordinal)
             .ThenBy(r => r.LineNumber)
             .ToList();
+
+        logger?.LogInformation("Completed ad-hoc source search for query {Query}: {MatchCount} matches", query, ordered.Count);
+
+        return ordered;
     }
 
     private static IEnumerable<string> EnumerateSearchableFiles(string projectPath)

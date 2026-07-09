@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using DotNetModAssess.Core.Models;
 using DotNetModAssess.Core.Parsing.Internal;
+using Microsoft.Extensions.Logging;
 using NuGet.Common;
 using NuGet.Frameworks;
 using NuGet.Protocol;
@@ -31,7 +32,7 @@ namespace DotNetModAssess.Core.PackageCompatibility;
 /// process-lifetime (see its own doc comment), so one shared instance is simpler than a new one
 /// per Blazor circuit for no benefit.
 /// </summary>
-public sealed class NuGetCompatibilityChecker : INuGetCompatibilityChecker
+public sealed class NuGetCompatibilityChecker(ILogger<NuGetCompatibilityChecker>? logger = null) : INuGetCompatibilityChecker
 {
     private static readonly string[] FallbackSources = ["https://api.nuget.org/v3/index.json"];
 
@@ -61,13 +62,16 @@ public sealed class NuGetCompatibilityChecker : INuGetCompatibilityChecker
         var cacheKey = BuildCacheKey(packageId, currentVersion, targetFrameworkMoniker);
         if (ResultCache.TryGetValue(cacheKey, out var cached))
         {
+            logger?.LogInformation("Cache hit for package {PackageId} {Version} targeting {TargetFrameworkMoniker}", packageId, currentVersion, targetFrameworkMoniker);
             return cached;
         }
+
+        logger?.LogInformation("Cache miss for package {PackageId} {Version} targeting {TargetFrameworkMoniker}; querying NuGet sources", packageId, currentVersion, targetFrameworkMoniker);
 
         PackageCompatibilityInfo result;
         try
         {
-            result = await CheckUncachedAsync(solutionRootDirectory, packageId, currentVersion, targetFrameworkMoniker, cancellationToken)
+            result = await CheckUncachedAsync(solutionRootDirectory, packageId, currentVersion, targetFrameworkMoniker, cancellationToken, logger)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -83,6 +87,7 @@ public sealed class NuGetCompatibilityChecker : INuGetCompatibilityChecker
             // to a Failed(...) result inside CheckUncachedAsync, but this guarantees the "never
             // throw out of CheckAsync" contract holds even for a failure mode we didn't think of
             // (e.g. a malformed source URL from an unusual NuGet.Config).
+            logger?.LogError(ex, "Unexpected error checking compatibility for package {PackageId} {Version}", packageId, currentVersion);
             result = Failed(packageId, currentVersion, targetFrameworkMoniker, $"Unexpected error: {ex.Message}");
         }
 
@@ -99,7 +104,8 @@ public sealed class NuGetCompatibilityChecker : INuGetCompatibilityChecker
         string packageId,
         string currentVersion,
         string targetFrameworkMoniker,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Microsoft.Extensions.Logging.ILogger? logger)
     {
         NuGetFramework targetFramework;
         try
@@ -124,9 +130,9 @@ public sealed class NuGetCompatibilityChecker : INuGetCompatibilityChecker
                 $"Current version '{currentVersion}' is not a valid NuGet version string.");
         }
 
-        var repositories = BuildRepositories(solutionRootDirectory);
+        var repositories = BuildRepositories(solutionRootDirectory, logger);
         using var cacheContext = new SourceCacheContext();
-        var logger = NullLogger.Instance;
+        var nugetLogger = NullLogger.Instance;
 
         FindPackageByIdResource? workingResource = null;
         List<NuGetVersion>? allVersions = null;
@@ -143,7 +149,7 @@ public sealed class NuGetCompatibilityChecker : INuGetCompatibilityChecker
                     continue;
                 }
 
-                var versions = (await resource.GetAllVersionsAsync(packageId, cacheContext, logger, cancellationToken).ConfigureAwait(false))
+                var versions = (await resource.GetAllVersionsAsync(packageId, cacheContext, nugetLogger, cancellationToken).ConfigureAwait(false))
                     ?.ToList();
 
                 if (versions is { Count: > 0 })
@@ -163,6 +169,7 @@ public sealed class NuGetCompatibilityChecker : INuGetCompatibilityChecker
                 // one misconfigured/unreachable source (e.g. a private feed requiring auth we
                 // don't have) shouldn't fail the whole check if another configured source (often
                 // nuget.org itself) has the package.
+                logger?.LogWarning(ex, "Failed to resolve package {PackageId} from source {SourceName}", packageId, repository.PackageSource.Name);
                 sourceErrors.Add($"{repository.PackageSource.Name}: {ex.Message}");
             }
         }
@@ -170,6 +177,7 @@ public sealed class NuGetCompatibilityChecker : INuGetCompatibilityChecker
         if (workingResource is null || allVersions is null)
         {
             var detail = sourceErrors.Count > 0 ? $" Errors: {string.Join("; ", sourceErrors)}" : string.Empty;
+            logger?.LogWarning("Package {PackageId} was not found on any of the {SourceCount} configured source(s)", packageId, repositories.Count);
             return Failed(packageId, currentVersion, targetFrameworkMoniker,
                 $"Package '{packageId}' was not found on any of the {repositories.Count} configured source(s).{detail}");
         }
@@ -178,7 +186,7 @@ public sealed class NuGetCompatibilityChecker : INuGetCompatibilityChecker
 
         async Task<bool> IsCompatibleAsync(NuGetVersion version)
         {
-            var dependencyInfo = await workingResource.GetDependencyInfoAsync(packageId, version, cacheContext, logger, cancellationToken)
+            var dependencyInfo = await workingResource.GetDependencyInfoAsync(packageId, version, cacheContext, nugetLogger, cancellationToken)
                 .ConfigureAwait(false);
             return dependencyInfo is not null && HasCompatibleDependencyGroup(dependencyInfo.DependencyGroups, targetFramework);
         }
@@ -194,6 +202,7 @@ public sealed class NuGetCompatibilityChecker : INuGetCompatibilityChecker
         }
         catch (Exception ex)
         {
+            logger?.LogError(ex, "Could not retrieve dependency info for package {PackageId} {Version}", packageId, currentVersion);
             return Failed(packageId, currentVersion, targetFrameworkMoniker,
                 $"Could not retrieve dependency info for {packageId} {currentVersion}: {ex.Message}");
         }
@@ -217,10 +226,11 @@ public sealed class NuGetCompatibilityChecker : INuGetCompatibilityChecker
                 {
                     throw;
                 }
-                catch
+                catch (Exception ex)
                 {
                     // A single version's dependency info failing to resolve shouldn't abort the
                     // search for a recommended upgrade - just skip it and keep looking.
+                    logger?.LogWarning(ex, "Could not retrieve dependency info for candidate version {PackageId} {Version}; skipping", packageId, candidate);
                     continue;
                 }
 
@@ -231,6 +241,10 @@ public sealed class NuGetCompatibilityChecker : INuGetCompatibilityChecker
                 }
             }
         }
+
+        logger?.LogInformation(
+            "Checked compatibility for package {PackageId} {Version}: compatible={IsCompatible}, recommendedUpgrade={RecommendedUpgradeVersion}",
+            packageId, currentVersion, currentVersionIsCompatible, recommendedUpgradeVersion);
 
         return new PackageCompatibilityInfo
         {
@@ -252,15 +266,16 @@ public sealed class NuGetCompatibilityChecker : INuGetCompatibilityChecker
     /// parser already uses), falling back to nuget.org alone if resolution yields nothing enabled
     /// - mirroring the old dep-analyzer prototype's <c>BuildRepositories</c> fallback behavior.
     /// </summary>
-    private static IReadOnlyList<SourceRepository> BuildRepositories(string solutionRootDirectory)
+    private static IReadOnlyList<SourceRepository> BuildRepositories(string solutionRootDirectory, Microsoft.Extensions.Logging.ILogger? logger)
     {
         IReadOnlyList<NuGetSourceModel> sources;
         try
         {
             sources = NuGetConfigResolver.ResolveSources(solutionRootDirectory).Where(s => s.IsEnabled).ToList();
         }
-        catch
+        catch (Exception ex)
         {
+            logger?.LogWarning(ex, "Failed to resolve NuGet sources for {SolutionRootDirectory}; falling back to nuget.org", solutionRootDirectory);
             sources = [];
         }
 

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Buildalyzer;
+using Microsoft.Extensions.Logging;
 
 namespace DotNetModAssess.Core.Parsing.Internal;
 
@@ -17,16 +18,18 @@ internal static class EvaluationCache
 
     private static readonly ConcurrentDictionary<string, Entry> Entries = new(StringComparer.OrdinalIgnoreCase);
 
-    public static ProjectEvaluationOutcome GetOrEvaluate(IAnalyzerManager manager, string projectPath)
+    public static ProjectEvaluationOutcome GetOrEvaluate(IAnalyzerManager manager, string projectPath, ILogger? logger = null)
     {
         var lastWriteTimeUtc = File.Exists(projectPath) ? File.GetLastWriteTimeUtc(projectPath) : DateTime.MinValue;
 
         if (Entries.TryGetValue(projectPath, out var cached) && cached.LastWriteTimeUtc == lastWriteTimeUtc)
         {
+            logger?.LogDebug("Evaluation cache hit for project {ProjectPath}", projectPath);
             return cached.Outcome;
         }
 
-        var outcome = ProjectEvaluator.Evaluate(manager, projectPath);
+        logger?.LogDebug("Evaluation cache miss for project {ProjectPath}; evaluating now", projectPath);
+        var outcome = ProjectEvaluator.Evaluate(manager, projectPath, logger);
         Entries[projectPath] = new Entry(lastWriteTimeUtc, outcome);
         return outcome;
     }
