@@ -1,6 +1,6 @@
+using DotNetModAssess.Core.Graph;
 using DotNetModAssess.Core.Parsing;
 using DotNetModAssess.Web.Components;
-using DotNetModAssess.Web.Parsing;
 using DotNetModAssess.Web.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -9,8 +9,10 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-// Fixture-backed parser + per-circuit solution state (see SolutionStateService for why Scoped).
-builder.Services.AddScoped<ISolutionParser, FixtureBackedSolutionParser>();
+// Real Buildalyzer-backed parser + graph builder, per-circuit solution state
+// (see SolutionStateService for why Scoped).
+builder.Services.AddScoped<ISolutionParser, BuildalyzerSolutionParser>();
+builder.Services.AddScoped<IDependencyGraphBuilder, DependencyGraphBuilder>();
 builder.Services.AddScoped<SolutionStateService>();
 
 var app = builder.Build();

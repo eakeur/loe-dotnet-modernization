@@ -10,9 +10,9 @@
     <div class="card-body">
         <h5 class="card-title">Load a solution</h5>
         <p class="text-muted">
-            The real Buildalyzer-backed parser is still being built in parallel. Until it lands,
-            loading always returns the checked-in fixture solution regardless of the path entered
-            below.
+            Enter the path to a <code>.sln</code> or <code>.slnf</code> file. Try the bundled
+            sample fixture at <code>fixtures/SampleLegacySolution/SampleLegacySolution.sln</code>
+            (repo-root-relative) to see a mixed legacy/SDK-style solution end to end.
         </p>
         <div class="input-group" style="max-width: 640px;">
             <input class="form-control" placeholder="e.g. C:\src\MyApp\MyApp.sln"
@@ -37,7 +37,7 @@
 
 @if (State.Solution is null)
 {
-    <p class="text-muted">No solution loaded yet. Click "Load solution" above to load the sample fixture.</p>
+    <p class="text-muted">No solution loaded yet. Enter a solution path above and click "Load solution".</p>
 }
 else
 {

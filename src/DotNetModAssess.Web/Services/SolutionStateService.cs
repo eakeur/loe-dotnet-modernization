@@ -1,8 +1,6 @@
-using DotNetModAssess.Core.Fixtures;
 using DotNetModAssess.Core.Graph;
 using DotNetModAssess.Core.Models;
 using DotNetModAssess.Core.Parsing;
-using DotNetModAssess.Web.Parsing;
 
 namespace DotNetModAssess.Web.Services;
 
@@ -16,17 +14,21 @@ namespace DotNetModAssess.Web.Services;
 /// mutable state that different users/tabs would stomp on. It's also not Transient because pages
 /// and their child components within the same circuit need to see the same loaded state.
 ///
-/// <see cref="LoadSolutionAsync"/> accepts a path argument for forward compatibility with the
-/// real parser, but since it's fixture-backed for now, the path is effectively ignored (it is
-/// still passed through to <see cref="ISolutionParser.ParseAsync"/> and logged there).
+/// <see cref="LoadSolutionAsync"/> parses whatever <c>.sln</c>/<c>.slnf</c> path is passed in via
+/// the real <see cref="ISolutionParser"/> (Buildalyzer-backed) and builds a real
+/// <see cref="DependencyGraph"/> for it via <see cref="IDependencyGraphBuilder"/> - both are real
+/// implementations now that Phases 1 and 2 have landed.
 ///
 /// Progress reporting is intentionally minimal/stubbed: real ingestion (MSBuild evaluation,
-/// NuGet resolution, graph building) will be long-running and should report granular progress
-/// over a SignalR circuit; here we simulate a few named stages with short delays so the page
-/// structure and data-binding for a progress UI is already in place for the real parser to plug
-/// into later.
+/// NuGet resolution, graph building) is long-running and should eventually report granular
+/// progress over the SignalR circuit as each project is evaluated; here we simulate a few named
+/// stages with short delays so the page structure and data-binding for a progress UI is already
+/// in place for that finer-grained reporting to plug into later.
 /// </summary>
-public sealed class SolutionStateService(ISolutionParser parser, ILogger<SolutionStateService> logger)
+public sealed class SolutionStateService(
+    ISolutionParser parser,
+    IDependencyGraphBuilder graphBuilder,
+    ILogger<SolutionStateService> logger)
 {
     private static readonly (string Message, int DelayMs)[] StubbedStages =
     [
@@ -72,7 +74,7 @@ public sealed class SolutionStateService(ISolutionParser parser, ILogger<Solutio
             }
 
             var solution = await parser.ParseAsync(solutionPath, cancellationToken);
-            var graph = FixtureDataLoader.LoadGraph(FixturePaths.GraphJsonPath, solution);
+            var graph = graphBuilder.Build(solution);
 
             Solution = solution;
             Graph = graph;
