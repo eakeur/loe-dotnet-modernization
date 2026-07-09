@@ -285,4 +285,40 @@ public class ReportingExporterTests : IDisposable
         Assert.True(confirmedHeadingIndex >= 0 && possibleHeadingIndex > confirmedHeadingIndex);
         Assert.True(syntheticRowIndex > possibleHeadingIndex);
     }
+
+    [Fact]
+    public async Task UsageReportExporter_AddsASpeculativeSectionForSuffixMatchResults()
+    {
+        var withSuffixMatch = _usageResults.Append(new UsageResult
+        {
+            FilePath = "src/SampleApp.Web/Program.cs",
+            LineNumber = 42,
+            MatchedSymbol = "HttpContextSpeculative",
+            Kind = UsageReferenceKind.Other,
+            ProjectPath = "src/SampleApp.Web/SampleApp.Web.csproj",
+            CodeSnippet = "var speculativeCtx = HttpContextSpeculative.Current;",
+            Confidence = UsageConfidence.SuffixMatch,
+            TargetName = "System.Web",
+        }).ToList();
+
+        var exporter = new UsageReportExporter();
+        var path = TempPath("usage-suffix-match.md");
+
+        await exporter.ExportAsync(withSuffixMatch, path);
+
+        var content = await File.ReadAllTextAsync(path);
+
+        Assert.Contains("**Total occurrences:** 6", content);
+        Assert.Contains("**Speculative (harvested partial match):** 1", content);
+        Assert.Contains("## Speculative usages (harvested partial match - high false-positive risk, verify manually)", content);
+
+        // The synthetic SuffixMatch row must land after the "Speculative usages" heading, not
+        // inside either of the higher-confidence sections' tables.
+        var possibleHeadingIndex = content.IndexOf("## Possible usages", StringComparison.Ordinal);
+        var speculativeHeadingIndex = content.IndexOf("## Speculative usages", StringComparison.Ordinal);
+        var syntheticRowIndex = content.IndexOf("var speculativeCtx = HttpContextSpeculative.Current;", StringComparison.Ordinal);
+
+        Assert.True(possibleHeadingIndex >= 0 && speculativeHeadingIndex > possibleHeadingIndex);
+        Assert.True(syntheticRowIndex > speculativeHeadingIndex);
+    }
 }

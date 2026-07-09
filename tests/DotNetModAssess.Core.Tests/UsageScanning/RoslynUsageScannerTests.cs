@@ -166,6 +166,30 @@ public class RoslynUsageScannerTests
         Assert.True(File.Exists(usingWebResult.FilePath));
         Assert.EndsWith("SampleApp.LegacyService.csproj", usingWebResult.ProjectPath);
         Assert.Equal("using System.Web;", usingWebResult.CodeSnippet);
+        Assert.Equal("System.Web", usingWebResult.TargetName);
+    }
+
+    [Fact]
+    public async Task ScanAsync_DoesNotDoubleReportConfirmedAndTextMatchForTheSameTargetOnTheSameLine()
+    {
+        var results = await ScanAsync();
+
+        // OrderNotifier.cs line 13 ("var ctx = System.Web.HttpContext.Current;") is confirmed by
+        // the Roslyn pass as a MemberAccess with MatchedSymbol "System.Web.HttpContext" for target
+        // "System.Web". The text-search pass's own word-boundary regex for the bare target name
+        // "System.Web" also matches that same line (a '.' immediately follows "Web", which still
+        // satisfies \b) -- before results were deduplicated by TargetName instead of the literal
+        // MatchedSymbol string, this surfaced as a second, redundant TextMatch result for the very
+        // same physical occurrence. There must be exactly one result now.
+        var occurrencesForSystemWebOnThatLine = results.Where(r =>
+            r.FilePath.EndsWith("OrderNotifier.cs", StringComparison.Ordinal) &&
+            r.LineNumber == 13 &&
+            r.TargetName == "System.Web").ToList();
+
+        var only = Assert.Single(occurrencesForSystemWebOnThatLine);
+        Assert.Equal(UsageConfidence.Confirmed, only.Confidence);
+        Assert.Equal("System.Web.HttpContext", only.MatchedSymbol);
+        Assert.Equal(UsageReferenceKind.MemberAccess, only.Kind);
     }
 
     [Fact]
