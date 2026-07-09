@@ -40,12 +40,14 @@ public sealed class UsageReportExporter
 
         var confirmed = usageResults.Where(u => u.Confidence == UsageConfidence.Confirmed).ToList();
         var textMatch = usageResults.Where(u => u.Confidence == UsageConfidence.TextMatch).ToList();
+        var suffixMatch = usageResults.Where(u => u.Confidence == UsageConfidence.SuffixMatch).ToList();
 
         sb.AppendLine("# Usage Report");
         sb.AppendLine();
         sb.AppendLine($"**Total occurrences:** {usageResults.Count}");
         sb.AppendLine($"**Confirmed (Roslyn syntax match):** {confirmed.Count}");
         sb.AppendLine($"**Possible (text match only):** {textMatch.Count}");
+        sb.AppendLine($"**Speculative (harvested partial match):** {suffixMatch.Count}");
         sb.AppendLine();
 
         sb.AppendLine("## Confirmed usages");
@@ -68,6 +70,21 @@ public sealed class UsageReportExporter
         sb.AppendLine($"**Count:** {textMatch.Count}");
         sb.AppendLine();
         AppendOccurrenceTable(sb, textMatch);
+
+        sb.AppendLine("## Speculative usages (harvested partial match - high false-positive risk, verify manually)");
+        sb.AppendLine();
+        sb.AppendLine(
+            "Matched by searching for a progressively-shortened suffix harvested from a *different*, " +
+            "already-confirmed qualified reference to the same target elsewhere in the solution (e.g. " +
+            "a confirmed \"System.Web.HttpContext\" reference seeds a search for the bare \"HttpContext\"). " +
+            "Catches bare/unqualified identifier usages neither of the other two passes can see, but at " +
+            "the weakest confidence of the three tiers: short/common harvested terms (a type named " +
+            "\"Client\" or \"Manager\") are a real source of noise. Treat every row here as a lead to " +
+            "verify manually, not ground truth.");
+        sb.AppendLine();
+        sb.AppendLine($"**Count:** {suffixMatch.Count}");
+        sb.AppendLine();
+        AppendOccurrenceTable(sb, suffixMatch);
 
         sb.AppendLine("## Counts by Matched Symbol");
         sb.AppendLine();

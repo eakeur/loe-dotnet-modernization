@@ -31,18 +31,25 @@ namespace DotNetModAssess.Core.UsageScanning;
 /// </para>
 ///
 /// <para>
-/// De-duplication: every result found here is checked against the Roslyn pass's results by the
-/// exact triple (FilePath, LineNumber, MatchedSymbol); a match already confirmed by Roslyn at that
-/// triple is not re-reported here as a separate <see cref="UsageConfidence.TextMatch"/> result -
-/// the goal is to surface what Roslyn didn't already confirm, not to double-count.
+/// De-duplication: every result found here is checked against the Roslyn pass's results by
+/// (FilePath, LineNumber, TargetName) - not by the literal <c>MatchedSymbol</c> text, since the two
+/// passes can (and often do) report different matched text for the very same physical occurrence
+/// of the same target (e.g. Roslyn confirms "System.Web.HttpContext" on a line while this pass's
+/// own regex for the bare target name "System.Web" also matches that same line's text - both are
+/// the same real occurrence of target "System.Web" and must collapse to one result). A match
+/// already confirmed by Roslyn at that (FilePath, LineNumber, TargetName) triple is not re-reported
+/// here as a separate <see cref="UsageConfidence.TextMatch"/> result - the goal is to surface what
+/// Roslyn didn't already confirm, not to double-count.
 /// </para>
 /// </summary>
 internal static class TextSearchUsageScanner
 {
     /// <summary>File extensions searched, beyond what the Roslyn pass already covers (".cs" is
     /// included too, since string literals/comments inside ".cs" files are themselves invisible to
-    /// the Roslyn structural scan).</summary>
-    private static readonly string[] SearchExtensions = [".cs", ".razor", ".cshtml", ".config", ".json", ".xml"];
+    /// the Roslyn structural scan). Internal (rather than private) so
+    /// <see cref="SuffixHarvestUsageScanner"/> can search the exact same broader file set for its
+    /// own harvested-suffix pass.</summary>
+    internal static readonly string[] SearchExtensions = [".cs", ".razor", ".cshtml", ".config", ".json", ".xml"];
 
     public static async Task<IReadOnlyList<UsageResult>> ScanAsync(
         SolutionModel solution,
@@ -50,11 +57,11 @@ internal static class TextSearchUsageScanner
         IReadOnlyList<UsageResult> confirmedResults,
         CancellationToken cancellationToken)
     {
-        var confirmedKeys = new HashSet<(string FilePath, int LineNumber, string MatchedSymbol)>(
-            confirmedResults.Select(r => (r.FilePath, r.LineNumber, r.MatchedSymbol)));
+        var confirmedKeys = new HashSet<(string FilePath, int LineNumber, string TargetName)>(
+            confirmedResults.Select(r => (r.FilePath, r.LineNumber, r.TargetName)));
 
         var results = new List<UsageResult>();
-        var seenKeys = new HashSet<(string FilePath, int LineNumber, string MatchedSymbol)>();
+        var seenKeys = new HashSet<(string FilePath, int LineNumber, string TargetName)>();
 
         foreach (var project in solution.Projects)
         {
@@ -113,6 +120,7 @@ internal static class TextSearchUsageScanner
                             ProjectPath = project.Path,
                             CodeSnippet = line.Trim(),
                             Confidence = UsageConfidence.TextMatch,
+                            TargetName = name,
                         });
                     }
                 }
@@ -128,7 +136,9 @@ internal static class TextSearchUsageScanner
 
     /// <summary>Builds a `\b`-anchored regex for a target name, escaping any regex metacharacters
     /// (dots being the common one in namespace/package names like "System.Web") so the target is
-    /// matched literally, with a word boundary on each side.</summary>
-    private static Regex BuildWordBoundaryRegex(string targetName) =>
+    /// matched literally, with a word boundary on each side. Internal (rather than private) so
+    /// <see cref="SuffixHarvestUsageScanner"/> can build the exact same style of regex for its own
+    /// harvested-suffix search terms instead of duplicating this logic.</summary>
+    internal static Regex BuildWordBoundaryRegex(string targetName) =>
         new(@"\b" + Regex.Escape(targetName) + @"\b", RegexOptions.CultureInvariant);
 }

@@ -56,8 +56,27 @@ namespace DotNetModAssess.Core.UsageScanning;
 /// <see cref="UsageTarget"/> names across a broader file set (not just ".cs"). Roslyn-syntax
 /// matches are tagged <see cref="UsageConfidence.Confirmed"/>; anything only the text pass found
 /// is tagged <see cref="UsageConfidence.TextMatch"/> and de-duplicated against this pass's results
-/// by (FilePath, LineNumber, MatchedSymbol) so the same physical occurrence is never reported
-/// twice. See <see cref="TextSearchUsageScanner"/> for that pass's own scope and limitations.
+/// by (FilePath, LineNumber, TargetName) so the same physical occurrence is never reported
+/// twice under two different confidence tiers. See <see cref="TextSearchUsageScanner"/> for that
+/// pass's own scope and limitations.
+/// </para>
+///
+/// <para>
+/// THIRD PASS: <see cref="SuffixHarvestUsageScanner"/> harvests a per-target vocabulary of
+/// progressively-shortened suffixes from this pass's own <see cref="UsageConfidence.Confirmed"/>
+/// results (e.g. a confirmed "System.Web.HttpContext" seeds searches for "Web.HttpContext" and bare
+/// "HttpContext") and searches for those too, catching the classic bare-identifier case neither of
+/// the other two passes can. Tagged <see cref="UsageConfidence.SuffixMatch"/> - the weakest tier -
+/// and likewise de-duplicated by (FilePath, LineNumber, TargetName) against both prior passes'
+/// results. See <see cref="SuffixHarvestUsageScanner"/> for that pass's own scope.
+/// </para>
+///
+/// <para>
+/// Every result from all three passes carries <see cref="UsageResult.TargetName"/> set to the
+/// owning <see cref="UsageTarget.Name"/>, regardless of what the pass's own <c>MatchedSymbol</c>
+/// text actually found - this is what makes the (FilePath, LineNumber, TargetName) dedup key (and
+/// any "usages of this target" lookup) meaningful across passes that otherwise report different
+/// literal matched text for the same underlying target.
 /// </para>
 /// </summary>
 public sealed class RoslynUsageScanner : IUsageScanner
@@ -97,12 +116,21 @@ public sealed class RoslynUsageScanner : IUsageScanner
         var textMatchResults = await TextSearchUsageScanner.ScanAsync(solution, targets, orderedConfirmed, cancellationToken)
             .ConfigureAwait(false);
 
+        var reportedSoFar = new List<UsageResult>(orderedConfirmed.Count + textMatchResults.Count);
+        reportedSoFar.AddRange(orderedConfirmed);
+        reportedSoFar.AddRange(textMatchResults);
+
+        var suffixMatchResults = await SuffixHarvestUsageScanner.ScanAsync(solution, targets, orderedConfirmed, reportedSoFar, cancellationToken)
+            .ConfigureAwait(false);
+
         // Ordering convention: every Confirmed (Roslyn) result first, in that pass's own sort
-        // order, followed by every TextMatch result, in its own sort order. This keeps the
-        // highest-confidence results first without interleaving the two passes.
-        var combined = new List<UsageResult>(orderedConfirmed.Count + textMatchResults.Count);
+        // order, followed by every TextMatch result, then every SuffixMatch result, each in its
+        // own sort order. This keeps the highest-confidence results first without interleaving
+        // the three passes.
+        var combined = new List<UsageResult>(orderedConfirmed.Count + textMatchResults.Count + suffixMatchResults.Count);
         combined.AddRange(orderedConfirmed);
         combined.AddRange(textMatchResults);
+        combined.AddRange(suffixMatchResults);
         return combined;
     }
 
@@ -275,7 +303,7 @@ public sealed class RoslynUsageScanner : IUsageScanner
             {
                 if (joined == target.Name || joined.StartsWith(target.Name + ".", StringComparison.Ordinal))
                 {
-                    AddResult(results, filePath, project, sourceText, name, joined, UsageReferenceKind.UsingDirective);
+                    AddResult(results, filePath, project, sourceText, name, joined, UsageReferenceKind.UsingDirective, target.Name);
                 }
             }
         }
@@ -311,7 +339,7 @@ public sealed class RoslynUsageScanner : IUsageScanner
                 }
 
                 var kind = ClassifyNamePosition(nameNode);
-                AddResult(results, filePath, project, sourceText, nameNode, matchedPrefix, kind);
+                AddResult(results, filePath, project, sourceText, nameNode, matchedPrefix, kind, target.Name);
             }
         }
     }
@@ -345,7 +373,7 @@ public sealed class RoslynUsageScanner : IUsageScanner
                     continue;
                 }
 
-                AddResult(results, filePath, project, sourceText, memberAccess, matchedPrefix, UsageReferenceKind.MemberAccess);
+                AddResult(results, filePath, project, sourceText, memberAccess, matchedPrefix, UsageReferenceKind.MemberAccess, target.Name);
             }
         }
     }
@@ -465,7 +493,8 @@ public sealed class RoslynUsageScanner : IUsageScanner
         SourceText sourceText,
         SyntaxNode node,
         string matchedSymbol,
-        UsageReferenceKind kind)
+        UsageReferenceKind kind,
+        string targetName)
     {
         var lineSpan = node.GetLocation().GetLineSpan();
         var lineIndex = lineSpan.StartLinePosition.Line;
@@ -483,6 +512,7 @@ public sealed class RoslynUsageScanner : IUsageScanner
             Kind = kind,
             ProjectPath = project.Path,
             CodeSnippet = snippet,
+            TargetName = targetName,
         });
     }
 }
