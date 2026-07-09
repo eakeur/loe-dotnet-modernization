@@ -120,7 +120,7 @@ internal sealed class SolutionGraphBuilder
         foreach (var f in directoryBuildPropsChain) AllDirectoryBuildPropsFilesEncountered.Add(f);
         foreach (var f in directoryBuildTargetsChain) AllDirectoryBuildTargetsFilesEncountered.Add(f);
 
-        var evaluation = ProjectEvaluator.Evaluate(_manager, projectPath);
+        var evaluation = EvaluationCache.GetOrEvaluate(_manager, projectPath);
 
         var isCentrallyManaged = DetermineIsCentrallyManaged(evaluation, directoryBuildPropsChain);
         var nearestDirectoryPackagesProps = DirectoryBuildFileWalker.FindNearestDirectoryPackagesProps(projectDirectory, _solutionRoot);

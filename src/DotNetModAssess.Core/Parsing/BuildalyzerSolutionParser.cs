@@ -17,7 +17,16 @@ namespace DotNetModAssess.Core.Parsing;
 /// </summary>
 public sealed class BuildalyzerSolutionParser : ISolutionParser
 {
-    public Task<SolutionModel> ParseAsync(string solutionPath, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Upper bound on concurrent MSBuild evaluations. Buildalyzer/MSBuild evaluation is CPU- and
+    /// I/O-heavy but each project's evaluation is independent of the others (evaluation, unlike
+    /// the ProjectReference-linking pass below, doesn't need its referenced projects to already be
+    /// built), so it's safe to fan out - bounded so a large monorepo doesn't spawn hundreds of
+    /// concurrent MSBuild evaluations at once.
+    /// </summary>
+    private static readonly int MaxConcurrentEvaluations = Math.Max(2, Environment.ProcessorCount / 2);
+
+    public async Task<SolutionModel> ParseAsync(string solutionPath, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -29,6 +38,20 @@ public sealed class BuildalyzerSolutionParser : ISolutionParser
         var solutionRoot = Path.GetDirectoryName(discovered.SolutionPath)!;
 
         var manager = new AnalyzerManager();
+
+        // Pre-warm the evaluation cache for every directly-discovered project in parallel (bounded
+        // concurrency). The sequential graph-linking pass below then hits a warm cache for these
+        // paths; only projects reachable *transitively* via a ProjectReference that isn't itself in
+        // the .sln fall back to being evaluated lazily, one at a time, during linking.
+        await Parallel.ForEachAsync(
+            discovered.Projects,
+            new ParallelOptions { MaxDegreeOfParallelism = MaxConcurrentEvaluations, CancellationToken = cancellationToken },
+            (project, ct) =>
+            {
+                EvaluationCache.GetOrEvaluate(manager, project.Path);
+                return ValueTask.CompletedTask;
+            });
+
         var builder = new SolutionGraphBuilder(manager, solutionRoot);
 
         foreach (var project in discovered.Projects)
@@ -52,6 +75,6 @@ public sealed class BuildalyzerSolutionParser : ISolutionParser
             DirectoryPackagesPropsPath = directoryPackagesPropsPath,
         };
 
-        return Task.FromResult(solution);
+        return solution;
     }
 }
