@@ -10,7 +10,7 @@
 else if (_project is null)
 {
     <div class="alert alert-warning">
-        No project found for path <code>@ProjectPath</code>. <a href="/projects">Back to project list</a>.
+        No project found for path <code>@(ProjectPath is null ? "" : Uri.UnescapeDataString(ProjectPath))</code>. <a href="/projects">Back to project list</a>.
     </div>
 }
 else
@@ -55,7 +55,7 @@ else
                             @foreach (var reference in _project.ProjectReferences)
                             {
                                 <li class="list-group-item">
-                                    <a href="@($"/projects/{reference.Path}")">@reference.Name</a>
+                                    <a href="@($"/projects/{Uri.EscapeDataString(reference.Path)}")">@reference.Name</a>
                                     <div class="text-muted small"><code>@reference.Path</code></div>
                                 </li>
                             }
@@ -76,7 +76,7 @@ else
                             @foreach (var dependent in _dependents)
                             {
                                 <li class="list-group-item">
-                                    <a href="@($"/projects/{dependent.Path}")">@dependent.Name</a>
+                                    <a href="@($"/projects/{Uri.EscapeDataString(dependent.Path)}")">@dependent.Name</a>
                                     <div class="text-muted small"><code>@dependent.Path</code></div>
                                 </li>
                             }
@@ -350,7 +350,14 @@ else
             return;
         }
 
-        _project = State.Solution.Projects.FirstOrDefault(p => p.Path == ProjectPath);
+        // Links to this page always URL-encode the project's (real, absolute) file path via
+        // Uri.EscapeDataString - a raw path can contain "/" (colliding with route segment
+        // boundaries), spaces, colons (Windows drive letters), etc. The catch-all route parameter
+        // below hands back that still-encoded string (ASP.NET Core's routing deliberately does not
+        // auto-decode "%2F" within route values, to avoid changing segment counts), so decode it
+        // once here before comparing against real ProjectModel.Path values.
+        var decodedProjectPath = ProjectPath is null ? null : Uri.UnescapeDataString(ProjectPath);
+        _project = State.Solution.Projects.FirstOrDefault(p => p.Path == decodedProjectPath);
         _dependents = FindDependents();
         _usagesOfThisProject = FindUsagesOfThisProject();
         _confirmedUsageCount = _usagesOfThisProject.Count(u => u.Confidence == UsageConfidence.Confirmed);

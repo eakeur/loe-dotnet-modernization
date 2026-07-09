@@ -207,7 +207,7 @@ else
     }
 
     private void GoToDetail(ProjectModel project) =>
-        Nav.NavigateTo($"/projects/{project.Path}");
+        Nav.NavigateTo($"/projects/{Uri.EscapeDataString(project.Path)}");
 
     [Inject]
     private NavigationManager Nav { get; set; } = default!;
