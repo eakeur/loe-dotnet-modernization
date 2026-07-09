@@ -28,15 +28,49 @@ internal static class SolutionFileDiscovery
         """^Project\("\{(?<typeGuid>[0-9A-Fa-f\-]+)\}"\)\s*=\s*"[^"]*"\s*,\s*"(?<path>[^"]*)"\s*,\s*"\{(?<guid>[0-9A-Fa-f\-]+)\}"\s*$""",
         RegexOptions.Multiline | RegexOptions.Compiled);
 
-    public static DiscoveredSolution Discover(string solutionOrFilterPath)
+    public static DiscoveredSolution Discover(string solutionOrProjectPath)
     {
-        var extension = Path.GetExtension(solutionOrFilterPath);
+        var extension = Path.GetExtension(solutionOrProjectPath);
+
         if (string.Equals(extension, ".slnf", StringComparison.OrdinalIgnoreCase))
         {
-            return DiscoverFromFilter(solutionOrFilterPath);
+            return DiscoverFromFilter(solutionOrProjectPath);
         }
 
-        return DiscoverFromSolution(solutionOrFilterPath);
+        if (string.Equals(extension, ".sln", StringComparison.OrdinalIgnoreCase))
+        {
+            return DiscoverFromSolution(solutionOrProjectPath);
+        }
+
+        if (IsProjectFileExtension(extension))
+        {
+            return DiscoverFromStandaloneProject(solutionOrProjectPath);
+        }
+
+        throw new NotSupportedException(
+            $"Unsupported file type '{extension}' for solution/project loading. Expected a .sln, .slnf, or a project file (.csproj/.vbproj/.fsproj).");
+    }
+
+    private static bool IsProjectFileExtension(string extension) =>
+        extension.Equals(".csproj", StringComparison.OrdinalIgnoreCase) ||
+        extension.Equals(".vbproj", StringComparison.OrdinalIgnoreCase) ||
+        extension.Equals(".fsproj", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// A standalone project file (no enclosing .sln at all) is treated as a "solution" containing
+    /// just that one project. <see cref="SolutionGraphBuilder"/>'s own recursive ProjectReference
+    /// resolution (see its class doc comment) already discovers and builds any referenced projects
+    /// on demand even though they're not part of this "discovered" list, so a multi-project
+    /// dependency graph still resolves correctly starting from a single entry-point project file.
+    /// There's no real .sln to read a project GUID/type GUID from, so both are left empty/null -
+    /// downstream metadata mapping already tolerates a missing type GUID (it only adds one when it
+    /// actually found one).
+    /// </summary>
+    private static DiscoveredSolution DiscoverFromStandaloneProject(string projectPath)
+    {
+        var fullPath = Path.GetFullPath(projectPath);
+        var project = new DiscoveredProject(fullPath, ProjectGuid: string.Empty, ProjectTypeGuidRaw: null);
+        return new DiscoveredSolution(fullPath, [project]);
     }
 
     private static DiscoveredSolution DiscoverFromSolution(string solutionPath)

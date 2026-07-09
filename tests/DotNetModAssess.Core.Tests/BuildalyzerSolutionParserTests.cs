@@ -42,6 +42,9 @@ public class BuildalyzerSolutionParserTests
     private static string FixtureFilterPath =>
         Path.Combine(RepoRoot, "fixtures", "SampleLegacySolution", "ModernOnly.slnf");
 
+    private static string FixtureStandaloneProjectPath =>
+        Path.Combine(RepoRoot, "fixtures", "SampleLegacySolution", "Modern.Sdk", "Modern.Sdk.csproj");
+
     private static async Task<SolutionModel> ParseFixtureAsync()
     {
         ISolutionParser parser = new BuildalyzerSolutionParser();
@@ -210,6 +213,37 @@ public class BuildalyzerSolutionParserTests
         var project = Assert.Single(discovered.Projects);
         Assert.EndsWith("Modern.Sdk.csproj", project.Path, StringComparison.OrdinalIgnoreCase);
         Assert.EndsWith("SampleLegacySolution.sln", discovered.SolutionPath, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SolutionFileDiscovery_ParsesStandaloneProjectFile_AsASingleProjectSolution()
+    {
+        var discovered = SolutionFileDiscovery.Discover(FixtureStandaloneProjectPath);
+
+        var project = Assert.Single(discovered.Projects);
+        Assert.EndsWith("Modern.Sdk.csproj", project.Path, StringComparison.OrdinalIgnoreCase);
+        Assert.EndsWith("Modern.Sdk.csproj", discovered.SolutionPath, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SolutionFileDiscovery_RejectsUnsupportedExtension()
+    {
+        Assert.Throws<NotSupportedException>(() => SolutionFileDiscovery.Discover("SomeFile.txt"));
+    }
+
+    [Fact]
+    public async Task ParseAsync_StandaloneProjectFile_StillResolvesItsProjectReferenceTransitively()
+    {
+        ISolutionParser parser = new BuildalyzerSolutionParser();
+        var solution = await parser.ParseAsync(FixtureStandaloneProjectPath);
+
+        // Only Modern.Sdk.csproj was handed to the parser - no .sln at all - but its
+        // ProjectReference to Legacy.Net48App must still be discovered and built on demand (see
+        // SolutionGraphBuilder's own doc comment), the same as when parsing via the .sln.
+        Assert.Equal(2, solution.Projects.Count);
+        var modern = Assert.Single(solution.Projects, p => p.Name == "Modern.Sdk");
+        Assert.Contains(solution.Projects, p => p.Name == "Legacy.Net48App");
+        Assert.Contains(modern.ProjectReferences, r => r.Name == "Legacy.Net48App");
     }
 
     [Theory]

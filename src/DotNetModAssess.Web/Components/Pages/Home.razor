@@ -19,12 +19,13 @@
         <section class="vsc-landing-section">
             <h2>Open</h2>
             <p class="vsc-muted vsc-small">
-                Enter the path to a <code>.sln</code> or <code>.slnf</code> file. Try the bundled sample
+                Enter the path to a <code>.sln</code>, <code>.slnf</code>, or a standalone project file
+                (<code>.csproj</code>/<code>.vbproj</code>/<code>.fsproj</code>). Try the bundled sample
                 fixture at <code>fixtures/SampleLegacySolution/SampleLegacySolution.sln</code>
                 (repo-root-relative) to see a mixed legacy/SDK-style solution end to end.
             </p>
             <div class="vsc-landing-open-row">
-                <input class="vsc-input" placeholder="e.g. /src/MyApp/MyApp.sln"
+                <input class="vsc-input" placeholder="e.g. /src/MyApp/MyApp.sln or MyApp.csproj"
                        @bind="_solutionPath" @bind:event="oninput" disabled="@State.IsLoading"
                        @onkeydown="OnKeyDown" />
                 <button class="vsc-btn" @onclick="LoadAsync" disabled="@(State.IsLoading || string.IsNullOrWhiteSpace(_solutionPath))">
