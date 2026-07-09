@@ -311,4 +311,84 @@ public class BuildalyzerSolutionParserTests
             Directory.Delete(dir, recursive: true);
         }
     }
+
+    /// <summary>
+    /// Regression test for a real bug: per the .slnf format spec, only "solution.path" is relative
+    /// to the .slnf file's own directory - every entry in "solution.projects" is relative to the
+    /// SOLUTION's directory instead (matching how those same paths appear inside the .sln itself),
+    /// regardless of where the .slnf physically lives. The existing ModernOnly.slnf fixture sits
+    /// right next to SampleLegacySolution.sln, so it can't catch a resolve-projects-relative-to-
+    /// filter-directory bug - this test deliberately puts the .slnf in a *different* directory
+    /// (a sibling "filters" folder) to prove project paths still resolve correctly.
+    /// </summary>
+    [Fact]
+    public void SolutionFileDiscovery_ParsesSlnf_WhenFilterLivesInADifferentDirectoryThanTheSolution()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "SlnfDifferentDirTests_" + Guid.NewGuid());
+        var solutionDir = Path.Combine(root, "solution");
+        var filtersDir = Path.Combine(root, "filters");
+        Directory.CreateDirectory(solutionDir);
+        Directory.CreateDirectory(filtersDir);
+
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(solutionDir, "ProjectA"));
+            Directory.CreateDirectory(Path.Combine(solutionDir, "ProjectB"));
+            File.WriteAllText(Path.Combine(solutionDir, "ProjectA", "ProjectA.csproj"), """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
+                </Project>
+                """);
+            File.WriteAllText(Path.Combine(solutionDir, "ProjectB", "ProjectB.csproj"), """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
+                </Project>
+                """);
+
+            var solutionPath = Path.Combine(solutionDir, "Test.sln");
+            File.WriteAllText(solutionPath, """
+                Microsoft Visual Studio Solution File, Format Version 12.00
+                # Visual Studio Version 17
+                VisualStudioVersion = 17.0.31903.59
+                MinimumVisualStudioVersion = 10.0.40219.1
+                Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ProjectA", "ProjectA\ProjectA.csproj", "{D521F944-D387-43E5-9B32-C1A81FEC9868}"
+                EndProject
+                Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ProjectB", "ProjectB\ProjectB.csproj", "{2E1F3B0A-9B7C-4B7B-8F1B-1F5A3D6C7E10}"
+                EndProject
+                Global
+                	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+                		Debug|Any CPU = Debug|Any CPU
+                	EndGlobalSection
+                	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+                		{D521F944-D387-43E5-9B32-C1A81FEC9868}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+                		{2E1F3B0A-9B7C-4B7B-8F1B-1F5A3D6C7E10}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+                	EndGlobalSection
+                EndGlobal
+                """);
+
+            // The filter lives in a sibling directory, not next to the .sln - "path" points up and
+            // back into solutionDir, while "projects" entries are relative to solutionDir itself
+            // (NOT to this filter file's own directory, which is filtersDir).
+            var filterPath = Path.Combine(filtersDir, "OnlyA.slnf");
+            File.WriteAllText(filterPath, """
+                {
+                  "solution": {
+                    "path": "..\\solution\\Test.sln",
+                    "projects": [
+                      "ProjectA\\ProjectA.csproj"
+                    ]
+                  }
+                }
+                """);
+
+            var discovered = SolutionFileDiscovery.Discover(filterPath);
+
+            var project = Assert.Single(discovered.Projects);
+            Assert.EndsWith("ProjectA.csproj", project.Path, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
 }

@@ -114,11 +114,18 @@ internal static class SolutionFileDiscovery
             return fullSolution;
         }
 
+        // Per the .slnf format spec, only "solution.path" is relative to the filter file's own
+        // directory (resolved above); every entry in "solution.projects" is relative to the
+        // SOLUTION's directory instead - it's meant to match the project paths as they appear
+        // inside the .sln itself, regardless of where the .slnf physically lives. Resolving these
+        // relative to filterDirectory only happens to work when the .slnf sits right next to the
+        // .sln, which is why this was easy to get wrong and not notice.
+        var solutionDirectory = Path.GetDirectoryName(solutionPath)!;
         var includedPaths = projectsElement
             .EnumerateArray()
             .Select(e => e.GetString())
             .Where(v => !string.IsNullOrWhiteSpace(v))
-            .Select(v => Path.GetFullPath(Path.Combine(filterDirectory, NormalizeSeparators(v!))))
+            .Select(v => Path.GetFullPath(Path.Combine(solutionDirectory, NormalizeSeparators(v!))))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var filteredProjects = fullSolution.Projects
