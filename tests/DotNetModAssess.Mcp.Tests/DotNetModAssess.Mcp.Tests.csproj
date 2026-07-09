@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+
+    <!-- See DotNetModAssess.Core.Tests.csproj's identical property for the full rationale: the
+         VSTest test host needs its own copy of NuGet.Frameworks to start up, which conflicts with
+         Microsoft.Build.Locator's MSBL001 check wanting it excluded here. -->
+    <DisableMSBuildAssemblyCopyCheck>true</DisableMSBuildAssemblyCopyCheck>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.0" />
+    <!-- These MSBuild-family overrides mirror DotNetModAssess.Core.Tests.csproj - required here
+         too because this project (via its DotNetModAssess.Mcp -> DotNetModAssess.Core reference
+         chain) transitively pulls in Buildalyzer/Microsoft.Build.Locator, whose own un-excluded
+         dependency edges on these packages would otherwise cause mismatched MSBuild assemblies to
+         be copied to this project's output. -->
+    <PackageReference Include="Microsoft.Build" Version="17.14.28" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Build.Framework" Version="17.14.28" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Build.Tasks.Core" Version="17.14.28" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Build.Utilities.Core" Version="17.14.28" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.NET.StringTools" Version="17.14.28" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="xunit" Version="2.5.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\DotNetModAssess.Mcp\DotNetModAssess.Mcp.csproj" />
+    <ProjectReference Include="..\..\src\DotNetModAssess.Core\DotNetModAssess.Core.csproj" />
+  </ItemGroup>
+
+</Project>
