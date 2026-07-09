@@ -10,6 +10,9 @@ using DotNetModAssess.Mcp.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Serilog;
+using Serilog.Events;
+using Serilog.Formatting.Compact;
 
 // The solution/filter/project path is a required command-line argument, not a tool parameter and
 // not interactive - the engineer configures it once in their MCP client's config (e.g. Claude
@@ -27,9 +30,19 @@ var solutionPath = args[0];
 var builder = Host.CreateApplicationBuilder(args);
 
 // MCP over stdio uses stdout exclusively for JSON-RPC protocol messages - any other output on
-// stdout (including the default console logger) corrupts the protocol stream. Route all logging
-// to stderr instead.
-builder.Logging.AddConsole(options => options.LogToStandardErrorThreshold = LogLevel.Trace);
+// stdout (including a default console logger) corrupts the protocol stream and breaks every tool
+// call. `standardErrorFromLevel: LogEventLevel.Verbose` routes ALL log events (Verbose being the
+// lowest level, so "from Verbose" means everything) to stderr instead of Serilog's console sink's
+// normal stdout default - this is the one setting in this entire file that must never be removed
+// or narrowed. CompactJsonFormatter emits one compact CLEF-style JSON object per line (short
+// property names - @t/@m/@l/etc, see https://clef-json.org), not the verbose/pretty-printed
+// formatter.
+builder.Services.AddSerilog((services, loggerConfiguration) => loggerConfiguration
+    .ReadFrom.Configuration(builder.Configuration)
+    .ReadFrom.Services(services)
+    .MinimumLevel.Debug()
+    .Enrich.FromLogContext()
+    .WriteTo.Console(new CompactJsonFormatter(), standardErrorFromLevel: LogEventLevel.Verbose));
 
 // Real Buildalyzer-backed parser + graph builder + Roslyn usage scanner + legacy-pattern
 // detectors, mirroring exactly how src/DotNetModAssess.Web/Program.cs registers these (see that
@@ -61,6 +74,9 @@ builder.Services
 
 var host = builder.Build();
 
+var startupLogger = host.Services.GetRequiredService<Microsoft.Extensions.Logging.ILogger<Program>>();
+startupLogger.LogInformation("Starting DotNetModAssess.Mcp for solution path {SolutionPath}", solutionPath);
+
 // Kick off loading as a background Task BEFORE host.RunAsync() starts the MCP protocol loop
 // accepting connections - the initialize handshake must never be delayed by a multi-minute
 // solution parse, regardless of solution size. Every data tool awaits
@@ -71,6 +87,18 @@ var host = builder.Build();
 var workspaceState = host.Services.GetRequiredService<McpWorkspaceState>();
 _ = workspaceState.StartAsync(solutionPath);
 
-await host.RunAsync();
+try
+{
+    await host.RunAsync();
+}
+finally
+{
+    Log.CloseAndFlush();
+}
 
 return 0;
+
+// So Program (the top-level statements' generated class) can be referenced as a generic type
+// argument above, for a logger category name matching the convention used everywhere else in this
+// codebase (ILogger<T> keyed by the owning type).
+partial class Program;
