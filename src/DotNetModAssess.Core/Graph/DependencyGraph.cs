@@ -65,6 +65,31 @@ public sealed class DependencyGraph
         return result;
     }
 
+    /// <summary>
+    /// Builds a new <see cref="DependencyGraph"/> containing just <paramref name="root"/> plus
+    /// every node reachable from it in either direction (its full transitive dependency <em>and</em>
+    /// dependent closure), and only the edges among that node set. Used by the project/package
+    /// detail panels so their graph tab renders a tree rooted at the thing being looked at rather
+    /// than the entire solution's graph with everything else highlighted/dimmed - important once a
+    /// solution has more than a couple hundred projects/packages (see the "known limit" warning in
+    /// <c>DependencyGraphView</c>).
+    /// </summary>
+    public DependencyGraph GetRootedSubgraph(GraphNode root)
+    {
+        var forward = GetTransitiveClosure(root, GraphDirection.Forward);
+        var reverse = GetTransitiveClosure(root, GraphDirection.Reverse);
+
+        var nodeIds = new HashSet<string>(forward.Select(n => n.Id).Concat(reverse.Select(n => n.Id)))
+        {
+            root.Id
+        };
+
+        var nodes = Nodes.Where(n => nodeIds.Contains(n.Id)).ToList();
+        var edges = Edges.Where(e => nodeIds.Contains(e.FromId) && nodeIds.Contains(e.ToId)).ToList();
+
+        return new DependencyGraph { Nodes = nodes, Edges = edges };
+    }
+
     private Dictionary<string, GraphNode> BuildNodeIndex() => Nodes.ToDictionary(n => n.Id);
 }
 

@@ -266,13 +266,17 @@ else
         }
         else if (_activeTab == Tab.Graph)
         {
-            @if (State.Graph is null)
+            @if (_rootedGraph is null)
             {
                 <p class="vsc-muted">Graph not available.</p>
             }
             else
             {
-                <DependencyGraphView Graph="State.Graph" Solution="State.Solution" InitialFocusNodeId="_project.Path" @key="_project.Path" />
+                <p class="vsc-muted vsc-small">
+                    Showing the dependency tree rooted at <strong>@_project.Name</strong> - its own
+                    dependencies/dependents and their shared packages, not the whole solution's graph.
+                </p>
+                <DependencyGraphView Graph="_rootedGraph" Solution="State.Solution" InitialFocusNodeId="_project.Path" @key="_project.Path" />
             }
         }
     </div>
@@ -289,6 +293,7 @@ else
     private int _confirmedUsageCount;
     private int _possibleUsageCount;
     private int _speculativeUsageCount;
+    private DependencyGraph? _rootedGraph;
     private Tab _activeTab = Tab.Dependencies;
     private string _rawPropertySearch = "";
 
@@ -306,11 +311,19 @@ else
             _confirmedUsageCount = 0;
             _possibleUsageCount = 0;
             _speculativeUsageCount = 0;
+            _rootedGraph = null;
             return;
         }
 
         var decodedProjectPath = ProjectPath is null ? null : Uri.UnescapeDataString(ProjectPath);
         _project = State.Solution.Projects.FirstOrDefault(p => p.Path == decodedProjectPath);
+
+        // The graph tab renders a tree rooted at just this project (its own transitive
+        // dependencies/dependents), not the whole solution's graph with everything else
+        // highlighted - see DependencyGraph.GetRootedSubgraph's own doc comment for why.
+        var projectNode = _project is null ? null : State.Graph?.Nodes.FirstOrDefault(n => n.Id == _project.Path);
+        _rootedGraph = projectNode is null ? null : State.Graph!.GetRootedSubgraph(projectNode);
+
         _dependents = FindDependents();
         _usagesOfThisProject = FindUsagesOfThisProject();
         _findingsForThisProject = (State.LegacyFindings ?? [])

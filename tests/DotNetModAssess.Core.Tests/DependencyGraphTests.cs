@@ -243,4 +243,54 @@ public class DependencyGraphTests
         Assert.Single(closureIds);
         Assert.Contains("Newtonsoft.Json", closureIds);
     }
+
+    [Fact]
+    public void GetRootedSubgraph_FromSharedProject_IncludesDependentsAndItsOwnPackage_ExcludesUnrelatedNodes()
+    {
+        var solution = LoadSolution();
+        var built = BuildGraph(solution);
+        var sharedNode = built.Nodes.Single(n => n.Id == SharedPath);
+
+        var subgraph = built.GetRootedSubgraph(sharedNode);
+        var nodeIds = subgraph.Nodes.Select(n => n.Id).ToHashSet();
+
+        // Root itself, its own package dependency, and both reverse dependents.
+        Assert.Contains(SharedPath, nodeIds);
+        Assert.Contains("Newtonsoft.Json", nodeIds);
+        Assert.Contains(WebPath, nodeIds);
+        Assert.Contains(LegacyServicePath, nodeIds);
+
+        // Packages only Web/LegacyService reference directly (not reachable from Shared in either
+        // direction) must not leak into a graph rooted at Shared.
+        Assert.DoesNotContain("Microsoft.EntityFrameworkCore.SqlServer", nodeIds);
+        Assert.DoesNotContain("Serilog.AspNetCore", nodeIds);
+        Assert.DoesNotContain("EntityFramework", nodeIds);
+
+        // Every edge in the subgraph must have both endpoints inside the node set - in particular
+        // Web/LegacyService's own edges to the shared Newtonsoft.Json node survive the filter (both
+        // endpoints already included for other reasons), which is what actually surfaces the
+        // 3-way version conflict when looking at a graph rooted at just the Shared project.
+        Assert.All(subgraph.Edges, e =>
+        {
+            Assert.Contains(e.FromId, nodeIds);
+            Assert.Contains(e.ToId, nodeIds);
+        });
+        Assert.Contains(subgraph.Edges, e => e.FromId == WebPath && e.ToId == "Newtonsoft.Json");
+        Assert.Contains(subgraph.Edges, e => e.FromId == LegacyServicePath && e.ToId == "Newtonsoft.Json");
+    }
+
+    [Fact]
+    public void GetRootedSubgraph_FromLeafProjectWithNoDependents_ContainsJustItselfAndItsOwnDependencies()
+    {
+        var solution = LoadSolution();
+        var built = BuildGraph(solution);
+        var webNode = built.Nodes.Single(n => n.Id == WebPath);
+
+        var subgraph = built.GetRootedSubgraph(webNode);
+        var nodeIds = subgraph.Nodes.Select(n => n.Id).ToHashSet();
+
+        Assert.Contains(WebPath, nodeIds);
+        Assert.DoesNotContain(LegacyServicePath, nodeIds); // unrelated sibling, not reachable from Web
+        Assert.DoesNotContain("EntityFramework", nodeIds); // LegacyService's package, not Web's
+    }
 }

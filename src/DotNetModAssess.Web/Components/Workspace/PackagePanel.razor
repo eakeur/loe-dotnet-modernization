@@ -100,13 +100,17 @@ else
         }
         else if (_activeTab == Tab.Graph)
         {
-            @if (State.Graph is null)
+            @if (_rootedGraph is null)
             {
                 <p class="vsc-muted">Graph not available.</p>
             }
             else
             {
-                <DependencyGraphView Graph="State.Graph" Solution="State.Solution" InitialFocusNodeId="package.PackageId" @key="package.PackageId" />
+                <p class="vsc-muted vsc-small">
+                    Showing the dependency tree rooted at <strong>@package.PackageId</strong> - which
+                    projects reference it and any packages it depends on, not the whole solution's graph.
+                </p>
+                <DependencyGraphView Graph="_rootedGraph" Solution="State.Solution" InitialFocusNodeId="package.PackageId" @key="package.PackageId" />
             }
         }
     </div>
@@ -124,6 +128,7 @@ else
     private int _possibleUsages;
     private int _speculativeUsages;
     private Dictionary<string, string> _projectNames = new();
+    private DependencyGraph? _rootedGraph;
     private Tab _activeTab = Tab.Overview;
 
     private bool _checking;
@@ -152,6 +157,7 @@ else
             _packageNode = null;
             _usagesOfThisPackage = [];
             _projectNames = new();
+            _rootedGraph = null;
             return;
         }
 
@@ -159,6 +165,11 @@ else
 
         var decodedPackageId = PackageId is null ? null : Uri.UnescapeDataString(PackageId);
         _packageNode = State.Graph.Nodes.OfType<PackageGraphNode>().FirstOrDefault(n => n.Package.PackageId == decodedPackageId);
+
+        // Graph tab renders a tree rooted at just this package - see
+        // DependencyGraph.GetRootedSubgraph's own doc comment for why (not the whole solution's
+        // graph with everything else highlighted).
+        _rootedGraph = _packageNode is null ? null : State.Graph.GetRootedSubgraph(_packageNode);
 
         _usagesOfThisPackage = (State.UsageResults ?? [])
             .Where(u => u.TargetName == decodedPackageId)
