@@ -28,10 +28,26 @@
         <span>Click a node to highlight its dependency neighborhood. Click empty canvas to clear. Scroll/drag to zoom/pan.</span>
     </div>
 
+    @if (Graph!.Nodes.Count > LargeGraphNodeThreshold)
+    {
+        <div class="alert alert-warning small mb-2">
+            This graph has @Graph.Nodes.Count nodes. Cytoscape.js rendering and interaction (zoom/pan/click-to-focus)
+            tends to get sluggish past a few hundred nodes - use the filters above to narrow it down to the
+            projects/packages you care about. A "collapse to package-group" view is a known future mitigation for
+            very large monorepos, not yet implemented.
+        </div>
+    }
+
     <div @ref="_containerRef" class="dependency-graph-canvas"></div>
 </div>
 
 @code {
+    /// <summary>Known responsiveness limit for the underlying Cytoscape.js canvas (see spec's
+    /// own "known limit" callout) - past this many nodes, rendering/interaction visibly degrades,
+    /// so we surface a warning nudging the assessor toward the filters instead of pretending it
+    /// scales indefinitely.</summary>
+    private const int LargeGraphNodeThreshold = 400;
+
     /// <summary>The graph to render. Required - the component does not read from
     /// <c>SolutionStateService</c> itself so it stays reusable outside the "current solution"
     /// context (the <c>/graph</c> page is what wires it to <c>SolutionStateService</c>).</summary>

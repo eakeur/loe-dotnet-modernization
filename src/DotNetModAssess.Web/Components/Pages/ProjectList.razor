@@ -63,52 +63,56 @@ else
 
     <p class="text-muted">Showing @filtered.Count of @State.Solution.Projects.Count projects.</p>
 
-    <table class="table table-hover align-middle">
-        <thead>
-            <tr>
-                <th role="button" @onclick='() => SetSort("Name")'>Name @SortIndicator("Name")</th>
-                <th>Path</th>
-                <th role="button" @onclick='() => SetSort("Format")'>Format @SortIndicator("Format")</th>
-                <th role="button" @onclick='() => SetSort("Tfm")'>Target Framework @SortIndicator("Tfm")</th>
-                <th>Packages model</th>
-                <th>Legacy signals</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var project in filtered)
-            {
-                <tr style="cursor:pointer" @onclick="() => GoToDetail(project)">
-                    <td>@project.Name</td>
-                    <td><code>@project.Path</code></td>
-                    <td>
-                        <span class="badge @(project.Format == ProjectFormat.LegacyStyle ? "bg-warning text-dark" : "bg-success")">
-                            @project.Format
-                        </span>
-                    </td>
-                    <td>@project.Metadata.TargetFrameworkRaw</td>
-                    <td>@project.Metadata.PackagesModel</td>
-                    <td>
-                        @if (project.Metadata.LegacySignals.ReferencesSystemWeb)
-                        {
-                            <span class="badge bg-secondary me-1">System.Web</span>
-                        }
-                        @if (project.Metadata.LegacySignals.ReferencesSystemServiceModel)
-                        {
-                            <span class="badge bg-secondary me-1">System.ServiceModel</span>
-                        }
-                        @if (project.Metadata.LegacySignals.ComReferences.Count > 0)
-                        {
-                            <span class="badge bg-secondary me-1">COM</span>
-                        }
-                        @if (project.Metadata.Diagnostics.Count > 0)
-                        {
-                            <span class="badge bg-danger me-1">@project.Metadata.Diagnostics.Count diagnostic(s)</span>
-                        }
-                    </td>
+    @* Virtualize (rather than @foreach) so large monorepo-scale project lists (hundreds of
+       projects) only materialize the rows currently scrolled into view. The scroll container
+       needs an explicit height for Blazor's Virtualize to know its viewport. *@
+    <div style="max-height: 70vh; overflow-y: auto;">
+        <table class="table table-hover align-middle">
+            <thead>
+                <tr>
+                    <th role="button" @onclick='() => SetSort("Name")'>Name @SortIndicator("Name")</th>
+                    <th>Path</th>
+                    <th role="button" @onclick='() => SetSort("Format")'>Format @SortIndicator("Format")</th>
+                    <th role="button" @onclick='() => SetSort("Tfm")'>Target Framework @SortIndicator("Tfm")</th>
+                    <th>Packages model</th>
+                    <th>Legacy signals</th>
                 </tr>
-            }
-        </tbody>
-    </table>
+            </thead>
+            <tbody>
+                <Virtualize Items="filtered" Context="project" ItemSize="49">
+                    <tr style="cursor:pointer" @onclick="() => GoToDetail(project)">
+                        <td>@project.Name</td>
+                        <td><code>@project.Path</code></td>
+                        <td>
+                            <span class="badge @(project.Format == ProjectFormat.LegacyStyle ? "bg-warning text-dark" : "bg-success")">
+                                @project.Format
+                            </span>
+                        </td>
+                        <td>@project.Metadata.TargetFrameworkRaw</td>
+                        <td>@project.Metadata.PackagesModel</td>
+                        <td>
+                            @if (project.Metadata.LegacySignals.ReferencesSystemWeb)
+                            {
+                                <span class="badge bg-secondary me-1">System.Web</span>
+                            }
+                            @if (project.Metadata.LegacySignals.ReferencesSystemServiceModel)
+                            {
+                                <span class="badge bg-secondary me-1">System.ServiceModel</span>
+                            }
+                            @if (project.Metadata.LegacySignals.ComReferences.Count > 0)
+                            {
+                                <span class="badge bg-secondary me-1">COM</span>
+                            }
+                            @if (project.Metadata.Diagnostics.Count > 0)
+                            {
+                                <span class="badge bg-danger me-1">@project.Metadata.Diagnostics.Count diagnostic(s)</span>
+                            }
+                        </td>
+                    </tr>
+                </Virtualize>
+            </tbody>
+        </table>
+    </div>
 }
 
 @code {
