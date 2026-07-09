@@ -87,6 +87,8 @@ public sealed class SolutionStateService(
 
     public async Task LoadSolutionAsync(string solutionPath, CancellationToken cancellationToken = default)
     {
+        Console.WriteLine(solutionPath);
+        
         if (IsLoading)
         {
             return;
