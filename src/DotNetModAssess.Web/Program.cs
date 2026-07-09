@@ -3,7 +3,9 @@ using DotNetModAssess.Core.LegacyPatterns;
 using DotNetModAssess.Core.PackageCompatibility;
 using DotNetModAssess.Core.Parsing;
 using DotNetModAssess.Core.Reporting;
+using DotNetModAssess.Core.Search;
 using DotNetModAssess.Core.UsageScanning;
+using DotNetModAssess.Core.Workspaces;
 using DotNetModAssess.Web.Components;
 using DotNetModAssess.Web.Services;
 
@@ -27,6 +29,13 @@ builder.Services.AddScoped<SolutionStateService>();
 // comment), so one shared instance across every circuit is simpler than a new one per connection
 // for no benefit.
 builder.Services.AddSingleton<INuGetCompatibilityChecker, NuGetCompatibilityChecker>();
+
+// Same rationale as NuGetCompatibilityChecker above: the recent-workspaces JSON file and the
+// ad-hoc source searcher hold no per-circuit state, so one shared singleton instance is simpler
+// than a new one per connection for no benefit. JsonFileRecentWorkspacesStore defaults to
+// %LocalAppData%/DotNetModAssess/recent-workspaces.json when constructed with no arguments.
+builder.Services.AddSingleton<IRecentWorkspacesStore, JsonFileRecentWorkspacesStore>();
+builder.Services.AddSingleton<IAdHocSourceSearcher, AdHocSourceSearcher>();
 
 // Legacy-pattern (WCF/WPF/ConfigurationManager/AppDomain/COM Interop) migration-blocker
 // detectors, fanned out by LegacyPatternScanner - a separate, complementary scan from the

@@ -1,7 +1,9 @@
 using DotNetModAssess.Core.Graph;
+using DotNetModAssess.Core.LegacyPatterns;
 using DotNetModAssess.Core.Models;
 using DotNetModAssess.Core.Parsing;
 using DotNetModAssess.Core.UsageScanning;
+using DotNetModAssess.Core.Workspaces;
 
 namespace DotNetModAssess.Web.Services;
 
@@ -43,6 +45,8 @@ public sealed class SolutionStateService(
     ISolutionParser parser,
     IDependencyGraphBuilder graphBuilder,
     IUsageScanner usageScanner,
+    ILegacyPatternScanner legacyPatternScanner,
+    IRecentWorkspacesStore recentWorkspacesStore,
     ILogger<SolutionStateService> logger) : IDisposable
 {
     private static readonly (string Message, int DelayMs)[] StubbedStages =
@@ -70,6 +74,14 @@ public sealed class SolutionStateService(
     public DependencyGraph? Graph { get; private set; }
 
     public IReadOnlyList<UsageResult>? UsageResults { get; private set; }
+
+    /// <summary>Legacy-pattern (WCF/WPF/ConfigurationManager/AppDomain/COM Interop) findings for
+    /// the currently loaded solution, scanned eagerly alongside everything else in
+    /// <see cref="LoadSolutionAsync"/> so the Overview panel's findings summary and each
+    /// project/package panel's "findings for this project/package" section have something to show
+    /// immediately, without every page that wants a findings count needing its own on-demand
+    /// "Scan" button and its own copy of the results.</summary>
+    public IReadOnlyList<UsageResult>? LegacyFindings { get; private set; }
 
     public bool IsLoading { get; private set; }
 
@@ -112,11 +124,27 @@ public sealed class SolutionStateService(
             NotifyChanged();
             var usageResults = await usageScanner.ScanAsync(solution, cancellationToken);
 
+            LoadingStageMessage = "Scanning for legacy migration-blocker patterns...";
+            NotifyChanged();
+            var legacyFindings = await legacyPatternScanner.ScanAsync(solution, cancellationToken);
+
             Solution = solution;
             Graph = graph;
             UsageResults = usageResults;
+            LegacyFindings = legacyFindings;
             LastLoadedPath = solutionPath;
             StartWatching(solution.Path);
+
+            // Best-effort: a failure to persist "recently opened" should never fail the load
+            // itself (the solution is fully loaded and usable either way).
+            try
+            {
+                await recentWorkspacesStore.RecordOpenedAsync(solutionPath, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to record '{SolutionPath}' as a recently-opened workspace.", solutionPath);
+            }
         }
         catch (Exception ex)
         {
@@ -129,6 +157,22 @@ public sealed class SolutionStateService(
             LoadingStageMessage = null;
             NotifyChanged();
         }
+    }
+
+    /// <summary>Returns to the "no workspace open" state (the landing/recent-workspaces screen),
+    /// without forgetting this path from the recent-workspaces list - the assessor can always
+    /// reopen it from there. Stops the file watcher too, since there is no longer a loaded
+    /// solution for it to trigger a re-load of.</summary>
+    public void CloseSolution()
+    {
+        StopWatching();
+        Solution = null;
+        Graph = null;
+        UsageResults = null;
+        LegacyFindings = null;
+        LastLoadedPath = null;
+        LastError = null;
+        NotifyChanged();
     }
 
     /// <summary>
