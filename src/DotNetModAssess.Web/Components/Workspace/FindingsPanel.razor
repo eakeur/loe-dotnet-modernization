@@ -1,0 +1,111 @@
+@page "/workspace/findings"
+@inject SolutionStateService State
+@inject IEnumerable<ILegacyPatternDetector> Detectors
+@implements IDisposable
+
+<PageTitle>Findings - DotNetModAssess</PageTitle>
+
+<p class="vsc-breadcrumb"><a href="/workspace">Overview</a> / Findings</p>
+<h1>Legacy Pattern Findings</h1>
+<p class="vsc-page-subtitle">
+    Five well-known .NET Framework/Windows-coupled migration blockers - WCF, WPF,
+    ConfigurationManager, AppDomain, and COM Interop - scanned automatically whenever a solution is
+    (re)loaded. This is a different question from a project's Usages tab: that asks "how much is
+    project/package X used elsewhere", this asks "does this solution use any of these specific,
+    well-known idioms, and where."
+</p>
+
+@if (State.Solution is null)
+{
+    <p class="vsc-muted">No solution loaded yet. <a href="/">Go open one</a>.</p>
+}
+else if (State.LegacyFindings is null)
+{
+    <p class="vsc-muted"><span class="vsc-spinner"></span>Scanning...</p>
+}
+else
+{
+    <div class="vsc-findings-filter-row">
+        <select class="vsc-input vsc-input-sm" style="max-width:260px;" @bind="_patternFilter" @bind:after="ApplyQueryFilter">
+            <option value="">All patterns</option>
+            @foreach (var name in AllPatternNames)
+            {
+                <option value="@name">@name</option>
+            }
+        </select>
+        @if (!string.IsNullOrEmpty(_patternFilter))
+        {
+            <a href="/workspace/findings">Clear filter</a>
+        }
+    </div>
+
+    @if (FilteredResults.Count == 0)
+    {
+        <p class="vsc-muted">No legacy patterns detected@(string.IsNullOrEmpty(_patternFilter) ? "" : $" for {_patternFilter}").</p>
+    }
+    else
+    {
+        @foreach (var group in ResultsByPattern)
+        {
+            <div class="vsc-panel-block">
+                <div class="vsc-panel-header">
+                    <span>@group.PatternName <span class="vsc-badge vsc-badge-neutral">@group.Results.Count</span></span>
+                </div>
+                <div class="vsc-panel-body">
+                    <p class="vsc-muted vsc-small">@group.Description</p>
+                    <UsageResultsTable Results="group.Results" />
+                </div>
+            </div>
+        }
+    }
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "pattern")]
+    [Parameter]
+    public string? Pattern { get; set; }
+
+    private string _patternFilter = "";
+
+    [Inject]
+    private NavigationManager Nav { get; set; } = default!;
+
+    protected override void OnInitialized()
+    {
+        State.Changed += OnStateChanged;
+    }
+
+    protected override void OnParametersSet()
+    {
+        _patternFilter = Pattern ?? "";
+    }
+
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
+    private void ApplyQueryFilter() =>
+        Nav.NavigateTo(string.IsNullOrEmpty(_patternFilter) ? "/workspace/findings" : $"/workspace/findings?pattern={Uri.EscapeDataString(_patternFilter)}");
+
+    private List<string> AllPatternNames => Detectors.Select(d => d.PatternName).OrderBy(n => n, StringComparer.Ordinal).ToList();
+
+    private Dictionary<string, string> DescriptionsByPatternName =>
+        Detectors.ToDictionary(d => d.PatternName, d => d.Description);
+
+    private List<UsageResult> FilteredResults =>
+        (State.LegacyFindings ?? [])
+            .Where(f => string.IsNullOrEmpty(_patternFilter) || f.TargetName == _patternFilter)
+            .ToList();
+
+    private List<PatternGroup> ResultsByPattern =>
+        FilteredResults
+            .GroupBy(r => r.TargetName)
+            .Select(g => new PatternGroup(
+                g.Key,
+                DescriptionsByPatternName.GetValueOrDefault(g.Key, string.Empty),
+                g.OrderBy(r => r.FilePath, StringComparer.Ordinal).ThenBy(r => r.LineNumber).ToList()))
+            .OrderBy(g => g.PatternName, StringComparer.Ordinal)
+            .ToList();
+
+    private sealed record PatternGroup(string PatternName, string Description, List<UsageResult> Results);
+
+    public void Dispose() => State.Changed -= OnStateChanged;
+}

@@ -1,0 +1,160 @@
+@page "/workspace/file"
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<PageTitle>@(_fileName ?? "File") - DotNetModAssess</PageTitle>
+
+@* Read-only source viewer backed by the Monaco Editor (the same editor VS Code itself uses),
+   loaded via wwwroot/js/codeViewer.js. The natural entry point is a "view source" link on any
+   usage/finding/search result row (see Shared/UsageResultsTable.razor) - those already carry
+   FilePath + LineNumber, which land here as the "path"/"line" query parameters, so the URL is
+   itself shareable/bookmarkable. *@
+<p class="vsc-breadcrumb"><a href="/workspace">Overview</a> / @(_fileName ?? "File")</p>
+<div class="vsc-page-title">
+    <h1>@(_fileName ?? "(no file)")</h1>
+    @if (Line is { } line)
+    {
+        <span class="vsc-badge vsc-badge-neutral">line @line</span>
+    }
+</div>
+<p class="vsc-page-subtitle vsc-mono">@Path</p>
+
+@if (string.IsNullOrWhiteSpace(Path))
+{
+    <p class="vsc-muted">No file selected. Open the viewer from a "view source" link on a usage, finding, or search result.</p>
+}
+else if (_error is not null)
+{
+    <div class="vsc-alert vsc-alert-error">@_error</div>
+}
+else
+{
+    <div @ref="_containerRef" class="vsc-code-viewer-container"></div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "path")]
+    [Parameter]
+    public string? Path { get; set; }
+
+    [SupplyParameterFromQuery(Name = "line")]
+    [Parameter]
+    public int? Line { get; set; }
+
+    /// <summary>Files larger than this are refused rather than handed whole to Monaco/sent over
+    /// the SignalR circuit - a read-only source *viewer* has no business opening multi-megabyte
+    /// generated files, and doing so would visibly stall the UI.</summary>
+    private const long MaxFileSizeBytes = 3 * 1024 * 1024;
+
+    private ElementReference _containerRef;
+    private IJSObjectReference? _module;
+    private IJSObjectReference? _editorApi;
+    private string? _error;
+    private string? _fileName;
+    private string? _loadedPath;
+
+    protected override void OnParametersSet()
+    {
+        _fileName = string.IsNullOrWhiteSpace(Path) ? null : System.IO.Path.GetFileName(Path);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (string.IsNullOrWhiteSpace(Path) || Path == _loadedPath)
+        {
+            return;
+        }
+
+        _error = ValidateAndReadFile(Path, out var content, out var language);
+        if (_error is not null)
+        {
+            _loadedPath = Path;
+            await DisposeEditorAsync();
+            StateHasChanged();
+            return;
+        }
+
+        await DisposeEditorAsync();
+
+        _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/codeViewer.js");
+        _editorApi = await _module.InvokeAsync<IJSObjectReference>("init", _containerRef, content, language, Line);
+        _loadedPath = Path;
+    }
+
+    private string? ValidateAndReadFile(string path, out string content, out string language)
+    {
+        content = "";
+        language = "plaintext";
+
+        try
+        {
+            if (!File.Exists(path))
+            {
+                return $"File not found: {path}";
+            }
+
+            var size = new FileInfo(path).Length;
+            if (size > MaxFileSizeBytes)
+            {
+                return $"File is too large to preview ({size / 1024:N0} KB, limit {MaxFileSizeBytes / 1024:N0} KB).";
+            }
+
+            content = File.ReadAllText(path);
+            language = LanguageForExtension(System.IO.Path.GetExtension(path));
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return $"Could not read file: {ex.Message}";
+        }
+    }
+
+    private static string LanguageForExtension(string extension) => extension.ToLowerInvariant() switch
+    {
+        ".cs" => "csharp",
+        ".razor" or ".cshtml" => "razor",
+        ".json" => "json",
+        ".xml" or ".config" or ".csproj" or ".props" or ".targets" => "xml",
+        ".ts" => "typescript",
+        ".js" => "javascript",
+        ".css" => "css",
+        ".html" => "html",
+        ".md" => "markdown",
+        _ => "plaintext"
+    };
+
+    private async Task DisposeEditorAsync()
+    {
+        if (_editorApi is not null)
+        {
+            try
+            {
+                await _editorApi.InvokeVoidAsync("dispose");
+            }
+            catch (JSDisconnectedException)
+            {
+                // Circuit already gone - nothing to clean up client-side.
+            }
+
+            await _editorApi.DisposeAsync();
+            _editorApi = null;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await DisposeEditorAsync();
+
+        if (_module is not null)
+        {
+            try
+            {
+                await _module.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // Same as above.
+            }
+        }
+    }
+}

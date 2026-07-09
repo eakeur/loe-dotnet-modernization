@@ -1,0 +1,199 @@
+@page "/workspace"
+@inject SolutionStateService State
+@implements IDisposable
+
+<PageTitle>Overview - DotNetModAssess</PageTitle>
+
+@if (State.Solution is null)
+{
+    <p class="vsc-muted">No solution loaded yet. <a href="/">Go open one</a>.</p>
+}
+else
+{
+    var solution = State.Solution;
+    var projects = solution.Projects;
+    var sdkCount = projects.Count(p => p.Format == ProjectFormat.SdkStyle);
+    var legacyCount = projects.Count(p => p.Format == ProjectFormat.LegacyStyle);
+    var packagesConfigCount = projects.Count(p => p.Metadata.PackagesModel == PackagesModel.PackagesConfig);
+    var tfmBreakdown = projects
+        .Select(p => string.IsNullOrWhiteSpace(p.Metadata.TargetFrameworkRaw) ? "(unknown)" : p.Metadata.TargetFrameworkRaw)
+        .GroupBy(tfm => tfm)
+        .OrderByDescending(g => g.Count())
+        .ThenBy(g => g.Key)
+        .ToList();
+
+    <div class="vsc-page-title">
+        <h1>@System.IO.Path.GetFileNameWithoutExtension(solution.Path)</h1>
+        @if (State.IsWatching)
+        {
+            <span class="vsc-badge vsc-badge-confirmed">&#9679; Live</span>
+        }
+    </div>
+    <p class="vsc-page-subtitle vsc-mono">@solution.Path</p>
+
+    <div class="vsc-stat-grid">
+        <div class="vsc-stat-tile"><div class="value">@projects.Count</div><div class="label">Projects</div></div>
+        <div class="vsc-stat-tile"><div class="value">@sdkCount / @legacyCount</div><div class="label">SDK-style / Legacy-style</div></div>
+        <div class="vsc-stat-tile"><div class="value">@packagesConfigCount</div><div class="label">Still on packages.config</div></div>
+        <div class="vsc-stat-tile"><div class="value">@solution.NuGetSources.Count</div><div class="label">NuGet sources</div></div>
+        <div class="vsc-stat-tile"><div class="value">@(State.Graph?.Nodes.Count(n => n.Kind == GraphNodeKind.Package) ?? 0)</div><div class="label">Distinct packages</div></div>
+    </div>
+
+    <div class="vsc-panel-block">
+        <div class="vsc-panel-header">Target framework breakdown</div>
+        <div class="vsc-panel-body">
+            @foreach (var group in tfmBreakdown)
+            {
+                <div class="vsc-tfm-row">
+                    <span>@group.Key</span>
+                    <span class="vsc-badge vsc-badge-neutral">@group.Count()</span>
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="vsc-panel-block">
+        <div class="vsc-panel-header">
+            Legacy pattern findings
+            <a class="vsc-btn vsc-btn-sm vsc-btn-secondary" href="/workspace/findings">View all &rarr;</a>
+        </div>
+        <div class="vsc-panel-body">
+            @if (State.LegacyFindings is null)
+            {
+                <p class="vsc-muted"><span class="vsc-spinner"></span>Scanning...</p>
+            }
+            else if (State.LegacyFindings.Count == 0)
+            {
+                <p class="vsc-muted">No legacy migration-blocker patterns detected across WCF, WPF, ConfigurationManager, AppDomain, or COM Interop.</p>
+            }
+            else
+            {
+                @foreach (var group in FindingsByPattern)
+                {
+                    <a class="vsc-findings-summary-row" href="@($"/workspace/findings?pattern={Uri.EscapeDataString(group.Key)}")">
+                        <span class="vsc-findings-name">@group.Key</span>
+                        <span class="vsc-badge vsc-badge-danger">@group.Count()</span>
+                    </a>
+                }
+            }
+        </div>
+    </div>
+
+    <div class="vsc-panel-block">
+        <div class="vsc-panel-header">Dependency graph</div>
+        <div class="vsc-panel-body">
+            <p class="vsc-muted vsc-small">
+                Click a project or package in the Explorer to see its dependency neighborhood, or browse
+                the full solution graph below.
+            </p>
+            <a class="vsc-btn vsc-btn-secondary" href="/workspace/graph">Open full graph &rarr;</a>
+        </div>
+    </div>
+
+    <div class="vsc-panel-block">
+        <div class="vsc-panel-header">Export</div>
+        <div class="vsc-panel-body">
+            <p class="vsc-muted vsc-small">
+                Generate a shareable snapshot of this analysis. Each button (re)generates the file
+                and immediately offers it for download.
+            </p>
+            <div class="vsc-export-row">
+                <button class="vsc-btn vsc-btn-secondary vsc-btn-sm" @onclick='() => ExportAsync("md")' disabled="@_exporting">Markdown summary</button>
+                <button class="vsc-btn vsc-btn-secondary vsc-btn-sm" @onclick='() => ExportAsync("json")' disabled="@_exporting">JSON summary</button>
+                <button class="vsc-btn vsc-btn-secondary vsc-btn-sm" @onclick='() => ExportAsync("dot")' disabled="@_exporting">Graph (DOT)</button>
+                <button class="vsc-btn vsc-btn-secondary vsc-btn-sm" @onclick='() => ExportAsync("mmd")' disabled="@_exporting">Graph (Mermaid)</button>
+            </div>
+            @if (_downloadUri is not null)
+            {
+                <div class="vsc-alert vsc-alert-info">
+                    <a href="@_downloadUri" download="@_downloadFileName">Download @_downloadFileName</a>
+                </div>
+            }
+            @if (_exportError is not null)
+            {
+                <div class="vsc-alert vsc-alert-error">Export failed: @_exportError</div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private bool _exporting;
+    private string? _downloadUri;
+    private string? _downloadFileName;
+    private string? _exportError;
+
+    [Inject]
+    private IReportExporter ReportExporter { get; set; } = default!;
+
+    [Inject]
+    private IGraphExporter GraphExporter { get; set; } = default!;
+
+    private List<IGrouping<string, UsageResult>> FindingsByPattern =>
+        (State.LegacyFindings ?? [])
+            .GroupBy(f => f.TargetName)
+            .OrderByDescending(g => g.Count())
+            .ThenBy(g => g.Key, StringComparer.Ordinal)
+            .ToList();
+
+    protected override void OnInitialized()
+    {
+        State.Changed += OnStateChanged;
+    }
+
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
+    private async Task ExportAsync(string extension)
+    {
+        if (State.Solution is null || State.Graph is null)
+        {
+            return;
+        }
+
+        _exporting = true;
+        _exportError = null;
+        _downloadUri = null;
+        StateHasChanged();
+
+        var tempPath = Path.Combine(Path.GetTempPath(), $"dotnetmodassess-export-{Guid.NewGuid():N}.{extension}");
+        try
+        {
+            if (extension is "md" or "json")
+            {
+                await ReportExporter.ExportAsync(State.Solution, State.Graph, State.UsageResults ?? [], tempPath);
+            }
+            else
+            {
+                await GraphExporter.ExportAsync(State.Graph, tempPath);
+            }
+
+            var bytes = await File.ReadAllBytesAsync(tempPath);
+            var mimeType = extension switch
+            {
+                "json" => "application/json",
+                "dot" => "text/vnd.graphviz",
+                "mmd" => "text/plain",
+                _ => "text/markdown"
+            };
+
+            _downloadUri = $"data:{mimeType};base64,{Convert.ToBase64String(bytes)}";
+            _downloadFileName = $"solution-{(extension is "md" or "json" ? "summary" : "graph")}.{extension}";
+        }
+        catch (Exception ex)
+        {
+            _exportError = ex.Message;
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+
+            _exporting = false;
+            StateHasChanged();
+        }
+    }
+
+    public void Dispose() => State.Changed -= OnStateChanged;
+}

@@ -1,0 +1,91 @@
+@page "/workspace/search"
+@inject SolutionStateService State
+@inject IAdHocSourceSearcher Searcher
+
+<PageTitle>Search - DotNetModAssess</PageTitle>
+
+<p class="vsc-breadcrumb"><a href="/workspace">Overview</a> / Search</p>
+<h1>Search</h1>
+<p class="vsc-page-subtitle">
+    A plain, word-boundary text search for anything - not limited to known project namespaces or
+    package ids - across every source file in the loaded solution (excluding <code>bin</code>/<code>obj</code>).
+    Every result is a text match, not a confirmed symbol reference, so treat it as a starting point
+    for a manual look, the same way the "Possible" tier elsewhere in this app does.
+</p>
+
+@if (State.Solution is null)
+{
+    <p class="vsc-muted">No solution loaded yet. <a href="/">Go open one</a>.</p>
+}
+else
+{
+    <div class="vsc-landing-open-row" style="max-width:560px;">
+        <input class="vsc-input" placeholder="Search source..." @bind="_query" @bind:event="oninput" @onkeydown="OnKeyDown" />
+        <button class="vsc-btn" @onclick="SearchAsync" disabled="@(_searching || string.IsNullOrWhiteSpace(_query))">
+            @(_searching ? "Searching..." : "Search")
+        </button>
+    </div>
+
+    @if (_error is not null)
+    {
+        <div class="vsc-alert vsc-alert-error">@_error</div>
+    }
+
+    @if (_results is not null)
+    {
+        <p class="vsc-muted vsc-small">@_results.Count result@(_results.Count == 1 ? "" : "s") for "@_lastQuery"</p>
+        <UsageResultsTable Results="_results" EmptyMessage="No matches." />
+    }
+}
+
+@code {
+    private string _query = "";
+    private string _lastQuery = "";
+    private bool _searching;
+    private string? _error;
+    private List<UsageResult>? _results;
+    private CancellationTokenSource? _cts;
+
+    private async Task SearchAsync()
+    {
+        if (State.Solution is null || string.IsNullOrWhiteSpace(_query) || _searching)
+        {
+            return;
+        }
+
+        _cts?.Cancel();
+        _cts = new CancellationTokenSource();
+
+        _searching = true;
+        _error = null;
+        StateHasChanged();
+
+        try
+        {
+            var results = await Searcher.SearchAsync(State.Solution, _query.Trim(), _cts.Token);
+            _results = results.ToList();
+            _lastQuery = _query.Trim();
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded by a newer search - drop silently.
+        }
+        catch (Exception ex)
+        {
+            _error = $"Search failed: {ex.Message}";
+        }
+        finally
+        {
+            _searching = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnKeyDown(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await SearchAsync();
+        }
+    }
+}

@@ -1,14 +1,15 @@
-@page "/graph"
+@page "/workspace/graph"
 @inject SolutionStateService State
 @implements IDisposable
 
-<PageTitle>Dependency Graph</PageTitle>
+<PageTitle>Dependency Graph - DotNetModAssess</PageTitle>
 
+<p class="vsc-breadcrumb"><a href="/workspace">Overview</a> / Full dependency graph</p>
 <h1>Dependency Graph</h1>
 
 @if (State.Solution is null || State.Graph is null)
 {
-    <p class="text-muted">No solution loaded yet. <a href="/">Go load one</a>.</p>
+    <p class="vsc-muted">No solution loaded yet. <a href="/">Go open one</a>.</p>
 }
 else
 {
