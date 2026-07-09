@@ -26,7 +26,7 @@ public sealed class BuildalyzerSolutionParser : ISolutionParser
     /// </summary>
     private static readonly int MaxConcurrentEvaluations = Math.Max(2, Environment.ProcessorCount / 2);
 
-    public async Task<SolutionModel> ParseAsync(string solutionPath, CancellationToken cancellationToken = default)
+    public async Task<SolutionModel> ParseAsync(string solutionPath, IProgress<string>? progress = null, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -34,6 +34,7 @@ public sealed class BuildalyzerSolutionParser : ISolutionParser
         // discovery (which uses Microsoft.Build.Construction.SolutionFile to parse .sln files).
         MSBuildEnvironmentInitializer.EnsureRegistered();
 
+        progress?.Report($"Discovering projects in {Path.GetFileName(solutionPath)}...");
         var discovered = SolutionFileDiscovery.Discover(solutionPath);
         var solutionRoot = Path.GetDirectoryName(discovered.SolutionPath)!;
 
@@ -43,15 +44,20 @@ public sealed class BuildalyzerSolutionParser : ISolutionParser
         // concurrency). The sequential graph-linking pass below then hits a warm cache for these
         // paths; only projects reachable *transitively* via a ProjectReference that isn't itself in
         // the .sln fall back to being evaluated lazily, one at a time, during linking.
+        var totalProjects = discovered.Projects.Count;
+        var evaluatedCount = 0;
         await Parallel.ForEachAsync(
             discovered.Projects,
             new ParallelOptions { MaxDegreeOfParallelism = MaxConcurrentEvaluations, CancellationToken = cancellationToken },
             (project, ct) =>
             {
                 EvaluationCache.GetOrEvaluate(manager, project.Path);
+                var done = Interlocked.Increment(ref evaluatedCount);
+                progress?.Report($"Evaluating {Path.GetFileName(project.Path)}... ({done}/{totalProjects})");
                 return ValueTask.CompletedTask;
             });
 
+        progress?.Report("Resolving project reference graph...");
         var builder = new SolutionGraphBuilder(manager, solutionRoot);
 
         foreach (var project in discovered.Projects)
@@ -62,6 +68,7 @@ public sealed class BuildalyzerSolutionParser : ISolutionParser
 
         var projectModels = builder.GetAllBuiltProjectsInDiscoveryOrder(discovered.Projects.Select(p => p.Path));
 
+        progress?.Report("Resolving NuGet sources and Central Package Management...");
         var directoryPackagesPropsPath = DirectoryBuildFileWalker.FindNearestDirectoryPackagesProps(solutionRoot, solutionRoot);
         var nugetSources = NuGetConfigResolver.ResolveSources(solutionRoot);
 

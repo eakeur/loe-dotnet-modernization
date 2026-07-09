@@ -12,7 +12,10 @@ namespace DotNetModAssess.Core.LegacyPatterns;
 /// </summary>
 public interface ILegacyPatternScanner
 {
-    Task<IReadOnlyList<UsageResult>> ScanAsync(SolutionModel solution, CancellationToken cancellationToken = default);
+    /// <param name="progress">Optional sink for granular status updates (e.g. which detector is
+    /// currently running) - see <see cref="DotNetModAssess.Core.Parsing.ISolutionParser.ParseAsync"/>
+    /// for the same convention.</param>
+    Task<IReadOnlyList<UsageResult>> ScanAsync(SolutionModel solution, IProgress<string>? progress = null, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Default implementation: just fans out to every registered detector and concatenates
@@ -20,13 +23,14 @@ public interface ILegacyPatternScanner
 /// <see cref="ILegacyPatternDetector"/>, not here.</summary>
 public sealed class LegacyPatternScanner(IEnumerable<ILegacyPatternDetector> detectors) : ILegacyPatternScanner
 {
-    public async Task<IReadOnlyList<UsageResult>> ScanAsync(SolutionModel solution, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<UsageResult>> ScanAsync(SolutionModel solution, IProgress<string>? progress = null, CancellationToken cancellationToken = default)
     {
         var results = new List<UsageResult>();
 
         foreach (var detector in detectors)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            progress?.Report($"Running {detector.PatternName} detector...");
             results.AddRange(await detector.DetectAsync(solution, cancellationToken).ConfigureAwait(false));
         }
 

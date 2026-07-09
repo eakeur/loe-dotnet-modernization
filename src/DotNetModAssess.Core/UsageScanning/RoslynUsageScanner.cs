@@ -81,7 +81,7 @@ namespace DotNetModAssess.Core.UsageScanning;
 /// </summary>
 public sealed class RoslynUsageScanner : IUsageScanner
 {
-    public async Task<IReadOnlyList<UsageResult>> ScanAsync(SolutionModel solution, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<UsageResult>> ScanAsync(SolutionModel solution, IProgress<string>? progress = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(solution);
 
@@ -99,6 +99,7 @@ public sealed class RoslynUsageScanner : IUsageScanner
                 continue;
             }
 
+            progress?.Report($"Scanning {project.Name} for usages...");
             foreach (var file in EnumerateSourceFiles(project))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -113,6 +114,7 @@ public sealed class RoslynUsageScanner : IUsageScanner
             .ThenBy(r => r.MatchedSymbol, StringComparer.Ordinal)
             .ToList();
 
+        progress?.Report("Scanning source for text-match usages...");
         var textMatchResults = await TextSearchUsageScanner.ScanAsync(solution, targets, orderedConfirmed, cancellationToken)
             .ConfigureAwait(false);
 
@@ -120,6 +122,7 @@ public sealed class RoslynUsageScanner : IUsageScanner
         reportedSoFar.AddRange(orderedConfirmed);
         reportedSoFar.AddRange(textMatchResults);
 
+        progress?.Report("Harvesting partial-identifier matches...");
         var suffixMatchResults = await SuffixHarvestUsageScanner.ScanAsync(solution, targets, orderedConfirmed, reportedSoFar, cancellationToken)
             .ConfigureAwait(false);
 

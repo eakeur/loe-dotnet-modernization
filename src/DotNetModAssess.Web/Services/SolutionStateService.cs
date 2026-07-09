@@ -17,16 +17,20 @@ namespace DotNetModAssess.Web.Services;
 /// mutable state that different users/tabs would stomp on. It's also not Transient because pages
 /// and their child components within the same circuit need to see the same loaded state.
 ///
-/// <see cref="LoadSolutionAsync"/> parses whatever <c>.sln</c>/<c>.slnf</c> path is passed in via
-/// the real <see cref="ISolutionParser"/> (Buildalyzer-backed) and builds a real
-/// <see cref="DependencyGraph"/> for it via <see cref="IDependencyGraphBuilder"/> - both are real
-/// implementations now that Phases 1 and 2 have landed.
+/// <see cref="LoadSolutionAsync"/> parses whatever <c>.sln</c>/<c>.slnf</c>/standalone project file
+/// is passed in via the real <see cref="ISolutionParser"/> (Buildalyzer-backed). <see cref="Graph"/>
+/// is built lazily, on first access, rather than eagerly here - constructing the full
+/// <see cref="DependencyGraph"/> is cheap (pure in-memory LINQ over already-parsed
+/// ProjectModel/PackageReferenceModel data, no I/O), so laziness costs nothing and means a
+/// workspace that's opened and closed without ever needing package/graph data never pays even that
+/// small cost.
 ///
-/// Progress reporting is intentionally minimal/stubbed: real ingestion (MSBuild evaluation,
-/// NuGet resolution, graph building) is long-running and should eventually report granular
-/// progress over the SignalR circuit as each project is evaluated; here we simulate a few named
-/// stages with short delays so the page structure and data-binding for a progress UI is already
-/// in place for that finer-grained reporting to plug into later.
+/// Progress reporting is real, not simulated: <see cref="ISolutionParser.ParseAsync"/>,
+/// <see cref="IUsageScanner.ScanAsync"/>, and <see cref="ILegacyPatternScanner.ScanAsync"/> all
+/// accept an <see cref="IProgress{T}"/> that this service wires directly to
+/// <see cref="LoadingStageMessage"/> + <see cref="Changed"/>, so a large solution's genuinely-slow
+/// MSBuild evaluation phase shows live per-project status instead of a single static label that
+/// makes it look stuck.
 ///
 /// "Live" re-scanning (see <see cref="StartWatching"/>): once a solution is loaded, a
 /// <see cref="FileSystemWatcher"/> rooted at the solution's directory watches for changes to
@@ -49,14 +53,6 @@ public sealed class SolutionStateService(
     IRecentWorkspacesStore recentWorkspacesStore,
     ILogger<SolutionStateService> logger) : IDisposable
 {
-    private static readonly (string Message, int DelayMs)[] StubbedStages =
-    [
-        ("Discovering projects...", 150),
-        ("Evaluating MSBuild projects...", 200),
-        ("Resolving NuGet packages...", 150),
-        ("Building dependency graph...", 150)
-    ];
-
     private static readonly string[] WatchedFilters =
     [
         "*.sln", "*.slnf", "*.csproj",
@@ -69,9 +65,28 @@ public sealed class SolutionStateService(
     private FileSystemWatcher? _watcher;
     private Timer? _debounceTimer;
 
+    private DependencyGraph? _graphCache;
+
     public SolutionModel? Solution { get; private set; }
 
-    public DependencyGraph? Graph { get; private set; }
+    /// <summary>
+    /// Lazily built from <see cref="Solution"/> on first access via the injected
+    /// <see cref="IDependencyGraphBuilder"/>, then cached until the next
+    /// <see cref="LoadSolutionAsync"/>/<see cref="CloseSolution"/> invalidates it. See this class's
+    /// own doc comment for why laziness here, despite building the graph being cheap either way.
+    /// </summary>
+    public DependencyGraph? Graph
+    {
+        get
+        {
+            if (_graphCache is null && Solution is not null)
+            {
+                _graphCache = graphBuilder.Build(Solution);
+            }
+
+            return _graphCache;
+        }
+    }
 
     public IReadOnlyList<UsageResult>? UsageResults { get; private set; }
 
@@ -99,8 +114,6 @@ public sealed class SolutionStateService(
 
     public async Task LoadSolutionAsync(string solutionPath, CancellationToken cancellationToken = default)
     {
-        Console.WriteLine(solutionPath);
-        
         if (IsLoading)
         {
             return;
@@ -110,28 +123,23 @@ public sealed class SolutionStateService(
         LastError = null;
         NotifyChanged();
 
+        var progress = new ActionProgress<string>(message =>
+        {
+            LoadingStageMessage = message;
+            NotifyChanged();
+        });
+
         try
         {
-            foreach (var (message, delayMs) in StubbedStages)
-            {
-                LoadingStageMessage = message;
-                NotifyChanged();
-                await Task.Delay(delayMs, cancellationToken);
-            }
+            progress.Report("Starting...");
+            var solution = await parser.ParseAsync(solutionPath, progress, cancellationToken);
 
-            var solution = await parser.ParseAsync(solutionPath, cancellationToken);
-            var graph = graphBuilder.Build(solution);
+            var usageResults = await usageScanner.ScanAsync(solution, progress, cancellationToken);
 
-            LoadingStageMessage = "Scanning source for project/package usages...";
-            NotifyChanged();
-            var usageResults = await usageScanner.ScanAsync(solution, cancellationToken);
-
-            LoadingStageMessage = "Scanning for legacy migration-blocker patterns...";
-            NotifyChanged();
-            var legacyFindings = await legacyPatternScanner.ScanAsync(solution, cancellationToken);
+            var legacyFindings = await legacyPatternScanner.ScanAsync(solution, progress, cancellationToken);
 
             Solution = solution;
-            Graph = graph;
+            _graphCache = null; // rebuilt lazily on first access against the new Solution
             UsageResults = usageResults;
             LegacyFindings = legacyFindings;
             LastLoadedPath = solutionPath;
@@ -169,7 +177,7 @@ public sealed class SolutionStateService(
     {
         StopWatching();
         Solution = null;
-        Graph = null;
+        _graphCache = null;
         UsageResults = null;
         LegacyFindings = null;
         LastLoadedPath = null;
@@ -252,5 +260,17 @@ public sealed class SolutionStateService(
     {
         StopWatching();
         _debounceTimer?.Dispose();
+    }
+
+    /// <summary>Minimal, deliberately non-<see cref="Progress{T}"/> <see cref="IProgress{T}"/>:
+    /// invokes the callback synchronously on whatever thread calls <see cref="Report"/> (including
+    /// worker threads inside <c>Parallel.ForEachAsync</c> during parsing), rather than
+    /// <see cref="Progress{T}"/>'s SynchronizationContext-capturing/posting behavior, which is both
+    /// unnecessary here (the callback just sets a field and raises an event; every subscriber to
+    /// <see cref="Changed"/> already marshals back onto the Blazor renderer's sync context itself
+    /// via <c>InvokeAsync</c>) and would add a layer of indirection that's harder to reason about.</summary>
+    private sealed class ActionProgress<T>(Action<T> onReport) : IProgress<T>
+    {
+        public void Report(T value) => onReport(value);
     }
 }

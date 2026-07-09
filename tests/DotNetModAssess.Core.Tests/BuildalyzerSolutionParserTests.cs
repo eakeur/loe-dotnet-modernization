@@ -256,4 +256,59 @@ public class BuildalyzerSolutionParserTests
     {
         Assert.Equal(expected, TargetFrameworkClassifier.NormalizeToMoniker(raw));
     }
+
+    /// <summary>
+    /// Regression test for SolutionGraphBuilder's own cycle guard (the `_inProgress` HashSet in
+    /// Parsing/Internal/SolutionGraphBuilder.cs): a genuine A-references-B-references-A
+    /// ProjectReference cycle (invalid for an actual MSBuild build, but nothing stops someone from
+    /// authoring one) must never hang the parser - it should return promptly with both projects
+    /// present, regardless of whether Buildalyzer's own MSBuild evaluation of the cyclic pair
+    /// succeeds or fails (that's orthogonal to what's being proven here). The explicit Timeout
+    /// means this test fails loudly rather than hanging the whole run if that guard is ever
+    /// accidentally removed/broken.
+    /// </summary>
+    [Fact(Timeout = 30000)]
+    public async Task ParseAsync_HandlesCircularProjectReferences_WithoutHanging()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "CycleSafetyTests_" + Guid.NewGuid());
+        Directory.CreateDirectory(dir);
+        var projectAPath = Path.Combine(dir, "ProjectA.csproj");
+        var projectBPath = Path.Combine(dir, "ProjectB.csproj");
+
+        try
+        {
+            File.WriteAllText(projectAPath, """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup>
+                    <TargetFramework>net8.0</TargetFramework>
+                  </PropertyGroup>
+                  <ItemGroup>
+                    <ProjectReference Include="ProjectB.csproj" />
+                  </ItemGroup>
+                </Project>
+                """);
+
+            File.WriteAllText(projectBPath, """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup>
+                    <TargetFramework>net8.0</TargetFramework>
+                  </PropertyGroup>
+                  <ItemGroup>
+                    <ProjectReference Include="ProjectA.csproj" />
+                  </ItemGroup>
+                </Project>
+                """);
+
+            ISolutionParser parser = new BuildalyzerSolutionParser();
+            var solution = await parser.ParseAsync(projectAPath);
+
+            Assert.Equal(2, solution.Projects.Count);
+            Assert.Contains(solution.Projects, p => p.Name == "ProjectA");
+            Assert.Contains(solution.Projects, p => p.Name == "ProjectB");
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
 }
