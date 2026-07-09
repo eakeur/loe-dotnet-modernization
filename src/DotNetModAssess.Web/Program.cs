@@ -1,5 +1,7 @@
 using DotNetModAssess.Core.Graph;
 using DotNetModAssess.Core.Parsing;
+using DotNetModAssess.Core.Reporting;
+using DotNetModAssess.Core.UsageScanning;
 using DotNetModAssess.Web.Components;
 using DotNetModAssess.Web.Services;
 
@@ -9,10 +11,13 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-// Real Buildalyzer-backed parser + graph builder, per-circuit solution state
-// (see SolutionStateService for why Scoped).
+// Real Buildalyzer-backed parser + graph builder + Roslyn usage scanner + report/graph exporters,
+// per-circuit solution state (see SolutionStateService for why Scoped).
 builder.Services.AddScoped<ISolutionParser, BuildalyzerSolutionParser>();
 builder.Services.AddScoped<IDependencyGraphBuilder, DependencyGraphBuilder>();
+builder.Services.AddScoped<IUsageScanner, RoslynUsageScanner>();
+builder.Services.AddScoped<IReportExporter, MarkdownJsonReportExporter>();
+builder.Services.AddScoped<IGraphExporter, DotMermaidGraphExporter>();
 builder.Services.AddScoped<SolutionStateService>();
 
 var app = builder.Build();

@@ -34,6 +34,9 @@ else
         <li class="nav-item">
             <button class="nav-link @(_activeTab == Tab.Metadata ? "active" : "")" @onclick='() => _activeTab = Tab.Metadata'>Metadata</button>
         </li>
+        <li class="nav-item">
+            <button class="nav-link @(_activeTab == Tab.Usages ? "active" : "")" @onclick='() => _activeTab = Tab.Usages'>Usages (@_usagesOfThisProject.Count)</button>
+        </li>
     </ul>
 
     @if (_activeTab == Tab.Dependencies)
@@ -100,12 +103,14 @@ else
                         <th>Centrally managed</th>
                         <th>Floating</th>
                         <th>Version conflict</th>
+                        <th>Usages</th>
                     </tr>
                 </thead>
                 <tbody>
                     @foreach (var package in _project.PackageReferences)
                     {
                         var conflict = GetPackageConflict(package.PackageId);
+                        var usageCount = CountUsagesOfSymbol(package.PackageId);
                         <tr>
                             <td>@package.PackageId</td>
                             <td>@(package.RequestedVersion ?? "-")</td>
@@ -124,6 +129,7 @@ else
                                     <span class="text-muted">-</span>
                                 }
                             </td>
+                            <td>@usageCount</td>
                         </tr>
                     }
                 </tbody>
@@ -231,6 +237,47 @@ else
             </div>
         </div>
     }
+    else if (_activeTab == Tab.Usages)
+    {
+        <p class="text-muted">
+            Roslyn syntax-tree usages of this project's approximate namespace
+            (<code>@(_project.Metadata.RootNamespace ?? _project.Metadata.AssemblyName ?? _project.Name)</code>)
+            found across the rest of the solution's source - a count and file/line breakdown of how much
+            removing or replacing this project would actually touch.
+        </p>
+        @if (_usagesOfThisProject.Count == 0)
+        {
+            <p class="text-muted">No usages found (or no other project references this one's namespace).</p>
+        }
+        else
+        {
+            <table class="table table-sm table-hover">
+                <thead>
+                    <tr>
+                        <th>Consuming project</th>
+                        <th>File</th>
+                        <th>Line</th>
+                        <th>Kind</th>
+                        <th>Matched symbol</th>
+                        <th>Snippet</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var usage in _usagesOfThisProject)
+                    {
+                        <tr>
+                            <td>@(usage.ProjectPath is null ? "-" : usage.ProjectPath)</td>
+                            <td><code>@usage.FilePath</code></td>
+                            <td>@usage.LineNumber</td>
+                            <td>@usage.Kind</td>
+                            <td><code>@usage.MatchedSymbol</code></td>
+                            <td><code>@usage.CodeSnippet</code></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    }
 }
 
 @code {
@@ -239,6 +286,7 @@ else
 
     private ProjectModel? _project;
     private List<ProjectModel> _dependents = [];
+    private List<UsageResult> _usagesOfThisProject = [];
     private Tab _activeTab = Tab.Dependencies;
     private string _rawPropertySearch = "";
 
@@ -251,12 +299,34 @@ else
         {
             _project = null;
             _dependents = [];
+            _usagesOfThisProject = [];
             return;
         }
 
         _project = State.Solution.Projects.FirstOrDefault(p => p.Path == ProjectPath);
         _dependents = FindDependents();
+        _usagesOfThisProject = FindUsagesOfThisProject();
     }
+
+    private List<UsageResult> FindUsagesOfThisProject()
+    {
+        if (_project is null)
+        {
+            return [];
+        }
+
+        var target = _project.Metadata.RootNamespace ?? _project.Metadata.AssemblyName ?? _project.Name;
+        return MatchUsagesOfSymbol(target).ToList();
+    }
+
+    private int CountUsagesOfSymbol(string symbol) => MatchUsagesOfSymbol(symbol).Count();
+
+    private IEnumerable<UsageResult> MatchUsagesOfSymbol(string symbol) =>
+        (State.UsageResults ?? [])
+            .Where(u => u.MatchedSymbol == symbol || u.MatchedSymbol.StartsWith(symbol + ".", StringComparison.Ordinal))
+            .OrderBy(u => u.ProjectPath)
+            .ThenBy(u => u.FilePath)
+            .ThenBy(u => u.LineNumber);
 
     private List<ProjectModel> FindDependents()
     {
@@ -302,6 +372,7 @@ else
     {
         Dependencies,
         Packages,
-        Metadata
+        Metadata,
+        Usages
     }
 }

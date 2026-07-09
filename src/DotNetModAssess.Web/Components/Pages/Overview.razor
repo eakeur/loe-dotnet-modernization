@@ -110,10 +110,48 @@ else
     </div>
 
     <p><a class="btn btn-outline-primary" href="/projects">Browse all projects &rarr;</a></p>
+
+    <div class="card mb-4">
+        <div class="card-header">Export</div>
+        <div class="card-body">
+            <p class="text-muted">
+                Generate a shareable snapshot of this analysis. Each button (re)generates the file
+                and immediately offers it for download.
+            </p>
+            <div class="d-flex flex-wrap gap-2">
+                <button class="btn btn-outline-secondary btn-sm" @onclick='() => ExportAsync("md")' disabled="@_exporting">Markdown summary</button>
+                <button class="btn btn-outline-secondary btn-sm" @onclick='() => ExportAsync("json")' disabled="@_exporting">JSON summary</button>
+                <button class="btn btn-outline-secondary btn-sm" @onclick='() => ExportAsync("dot")' disabled="@_exporting">Graph (DOT)</button>
+                <button class="btn btn-outline-secondary btn-sm" @onclick='() => ExportAsync("mmd")' disabled="@_exporting">Graph (Mermaid)</button>
+            </div>
+            @if (_downloadUri is not null)
+            {
+                <div class="mt-2">
+                    <a class="btn btn-success btn-sm" href="@_downloadUri" download="@_downloadFileName">
+                        Download @_downloadFileName
+                    </a>
+                </div>
+            }
+            @if (_exportError is not null)
+            {
+                <div class="alert alert-danger mt-2 mb-0">Export failed: @_exportError</div>
+            }
+        </div>
+    </div>
 }
 
 @code {
     private string _solutionPath = "";
+    private bool _exporting;
+    private string? _downloadUri;
+    private string? _downloadFileName;
+    private string? _exportError;
+
+    [Inject]
+    private IReportExporter ReportExporter { get; set; } = default!;
+
+    [Inject]
+    private IGraphExporter GraphExporter { get; set; } = default!;
 
     protected override void OnInitialized()
     {
@@ -123,6 +161,64 @@ else
     private async Task LoadAsync() => await State.LoadSolutionAsync(_solutionPath);
 
     private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
+    /// <summary>
+    /// Runs the matching exporter to a temp file, reads it back, and exposes it as a base64 "data:"
+    /// URI with a <c>download</c> attribute - the simplest way to hand the assessor a file from a
+    /// Blazor Server page without a separate minimal-API download endpoint (which wouldn't share
+    /// this circuit's DI scope/loaded solution anyway).
+    /// </summary>
+    private async Task ExportAsync(string extension)
+    {
+        if (State.Solution is null || State.Graph is null)
+        {
+            return;
+        }
+
+        _exporting = true;
+        _exportError = null;
+        _downloadUri = null;
+        StateHasChanged();
+
+        var tempPath = Path.Combine(Path.GetTempPath(), $"dotnetmodassess-export-{Guid.NewGuid():N}.{extension}");
+        try
+        {
+            if (extension is "md" or "json")
+            {
+                await ReportExporter.ExportAsync(State.Solution, State.Graph, State.UsageResults ?? [], tempPath);
+            }
+            else
+            {
+                await GraphExporter.ExportAsync(State.Graph, tempPath);
+            }
+
+            var bytes = await File.ReadAllBytesAsync(tempPath);
+            var mimeType = extension switch
+            {
+                "json" => "application/json",
+                "dot" => "text/vnd.graphviz",
+                "mmd" => "text/plain",
+                _ => "text/markdown"
+            };
+
+            _downloadUri = $"data:{mimeType};base64,{Convert.ToBase64String(bytes)}";
+            _downloadFileName = $"solution-{(extension is "md" or "json" ? "summary" : "graph")}.{extension}";
+        }
+        catch (Exception ex)
+        {
+            _exportError = ex.Message;
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+
+            _exporting = false;
+            StateHasChanged();
+        }
+    }
 
     public void Dispose() => State.Changed -= OnStateChanged;
 }

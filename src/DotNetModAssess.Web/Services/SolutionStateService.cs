@@ -1,6 +1,7 @@
 using DotNetModAssess.Core.Graph;
 using DotNetModAssess.Core.Models;
 using DotNetModAssess.Core.Parsing;
+using DotNetModAssess.Core.UsageScanning;
 
 namespace DotNetModAssess.Web.Services;
 
@@ -41,6 +42,7 @@ namespace DotNetModAssess.Web.Services;
 public sealed class SolutionStateService(
     ISolutionParser parser,
     IDependencyGraphBuilder graphBuilder,
+    IUsageScanner usageScanner,
     ILogger<SolutionStateService> logger) : IDisposable
 {
     private static readonly (string Message, int DelayMs)[] StubbedStages =
@@ -66,6 +68,8 @@ public sealed class SolutionStateService(
     public SolutionModel? Solution { get; private set; }
 
     public DependencyGraph? Graph { get; private set; }
+
+    public IReadOnlyList<UsageResult>? UsageResults { get; private set; }
 
     public bool IsLoading { get; private set; }
 
@@ -104,8 +108,13 @@ public sealed class SolutionStateService(
             var solution = await parser.ParseAsync(solutionPath, cancellationToken);
             var graph = graphBuilder.Build(solution);
 
+            LoadingStageMessage = "Scanning source for project/package usages...";
+            NotifyChanged();
+            var usageResults = await usageScanner.ScanAsync(solution, cancellationToken);
+
             Solution = solution;
             Graph = graph;
+            UsageResults = usageResults;
             LastLoadedPath = solutionPath;
             StartWatching(solution.Path);
         }
