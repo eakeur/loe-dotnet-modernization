@@ -49,3 +49,18 @@ public enum UsageReferenceKind
     BaseTypeOrInterface,
     Other
 }
+
+/// <summary>
+/// How a <see cref="UsageResult"/> was found. <see cref="Confirmed"/> means Roslyn's syntax-tree
+/// analysis matched a using directive/type reference/member access - low false-positive rate, but
+/// misses bare (non-fully-qualified) identifier usages within .cs files and anything outside C#
+/// source. <see cref="TextMatch"/> means only a plain word-boundary text search found it (any file
+/// type) - higher recall, but higher false-positive rate (comments, string literals, coincidental
+/// name collisions). Assessors should treat <see cref="TextMatch"/> results as "worth a manual
+/// look", not as ground truth.
+/// </summary>
+public enum UsageConfidence
+{
+    Confirmed,
+    TextMatch
+}
