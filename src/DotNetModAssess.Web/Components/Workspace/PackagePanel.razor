@@ -1,0 +1,216 @@
+@page "/workspace/package/{*PackageId}"
+@inject SolutionStateService State
+@inject INuGetCompatibilityChecker Checker
+@implements IDisposable
+
+<PageTitle>@(_packageNode?.Package.PackageId ?? "Package") - DotNetModAssess</PageTitle>
+
+@if (State.Solution is null)
+{
+    <p class="vsc-muted">No solution loaded yet. <a href="/">Go open one</a>.</p>
+}
+else if (_packageNode is null)
+{
+    <div class="vsc-alert vsc-alert-warning">
+        No package found with id <code>@(PackageId is null ? "" : Uri.UnescapeDataString(PackageId))</code>.
+    </div>
+}
+else
+{
+    var package = _packageNode.Package;
+    <p class="vsc-breadcrumb"><a href="/workspace">Overview</a> / @package.PackageId</p>
+    <div class="vsc-page-title">
+        <h1>@package.PackageId</h1>
+        @if (package.HasVersionConflict)
+        {
+            <span class="vsc-badge vsc-badge-danger">Version conflict</span>
+        }
+    </div>
+
+    <div class="vsc-tabs">
+        <button class="vsc-tab @(_activeTab == Tab.Overview ? "active" : "")" @onclick='() => _activeTab = Tab.Overview'>Overview</button>
+        <button class="vsc-tab @(_activeTab == Tab.Usages ? "active" : "")" @onclick='() => _activeTab = Tab.Usages'>Usages (@_confirmedUsages/@_possibleUsages/@_speculativeUsages)</button>
+        <button class="vsc-tab @(_activeTab == Tab.Graph ? "active" : "")" @onclick='() => _activeTab = Tab.Graph'>Graph</button>
+    </div>
+
+    <div class="vsc-tab-content">
+        @if (_activeTab == Tab.Overview)
+        {
+            <div class="vsc-panel-block">
+                <div class="vsc-panel-header">Versions in use (@package.ProjectVersions.Count reference@(package.ProjectVersions.Count == 1 ? "" : "s"))</div>
+                <div class="vsc-table-scroll">
+                    <table class="vsc-table">
+                        <thead><tr><th>Version</th><th>Project</th></tr></thead>
+                        <tbody>
+                            @foreach (var version in package.ProjectVersions.OrderBy(v => v.ProjectPath, StringComparer.OrdinalIgnoreCase))
+                            {
+                                <tr>
+                                    <td class="vsc-mono">@(string.IsNullOrEmpty(version.Version) ? "(unresolved)" : version.Version)</td>
+                                    <td><a href="@($"/workspace/project/{Uri.EscapeDataString(version.ProjectPath)}")">@ProjectName(version.ProjectPath)</a></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="vsc-panel-block">
+                <div class="vsc-panel-header">
+                    NuGet compatibility check
+                    <button class="vsc-btn vsc-btn-sm" @onclick="CheckCompatibilityAsync" disabled="@(_checking || string.IsNullOrEmpty(PrimaryVersion))">
+                        @(_checking ? "Checking..." : "Check compatibility")
+                    </button>
+                </div>
+                <div class="vsc-panel-body">
+                    <p class="vsc-muted vsc-small">
+                        Checks whether v@(PrimaryVersion ?? "?") (the version used by the alphabetically-first
+                        referencing project) is compatible with <code>@TargetFrameworkMoniker</code>. This is a
+                        real network call against the solution's configured NuGet sources, so it only runs on
+                        demand.
+                    </p>
+                    @if (_compatInfo is null)
+                    {
+                        <p class="vsc-muted">Not checked yet.</p>
+                    }
+                    else if (!_compatInfo.CheckSucceeded)
+                    {
+                        <div class="vsc-alert vsc-alert-warning">Check failed: @_compatInfo.ErrorMessage</div>
+                    }
+                    else if (_compatInfo.CurrentVersionIsCompatible)
+                    {
+                        <div class="vsc-alert vsc-alert-info">&#9989; Compatible with @TargetFrameworkMoniker.</div>
+                    }
+                    else if (_compatInfo.RecommendedUpgradeVersion is not null)
+                    {
+                        <div class="vsc-alert vsc-alert-warning">&#9888; Upgrade to v@(_compatInfo.RecommendedUpgradeVersion) for @TargetFrameworkMoniker compatibility.</div>
+                    }
+                    else
+                    {
+                        <div class="vsc-alert vsc-alert-error">
+                            &#9888; No compatible version published yet (latest: @(_compatInfo.LatestPublishedVersion ?? "unknown")).
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+        else if (_activeTab == Tab.Usages)
+        {
+            <p class="vsc-muted vsc-small">Usages of this package's id found across the solution's source.</p>
+            <UsageResultsTable Results="_usagesOfThisPackage" ResolveProjectDisplayName="ProjectName" EmptyMessage="No usages found for this package." />
+        }
+        else if (_activeTab == Tab.Graph)
+        {
+            @if (State.Graph is null)
+            {
+                <p class="vsc-muted">Graph not available.</p>
+            }
+            else
+            {
+                <DependencyGraphView Graph="State.Graph" Solution="State.Solution" InitialFocusNodeId="package.PackageId" @key="package.PackageId" />
+            }
+        }
+    </div>
+}
+
+@code {
+    private const string TargetFrameworkMoniker = "net8.0";
+
+    [Parameter]
+    public string? PackageId { get; set; }
+
+    private PackageGraphNode? _packageNode;
+    private List<UsageResult> _usagesOfThisPackage = [];
+    private int _confirmedUsages;
+    private int _possibleUsages;
+    private int _speculativeUsages;
+    private Dictionary<string, string> _projectNames = new();
+    private Tab _activeTab = Tab.Overview;
+
+    private bool _checking;
+    private PackageCompatibilityInfo? _compatInfo;
+    private readonly CancellationTokenSource _cts = new();
+
+    private string? PrimaryVersion => _packageNode?.Package.ProjectVersions
+        .OrderBy(v => v.ProjectPath, StringComparer.OrdinalIgnoreCase)
+        .Select(v => v.Version)
+        .FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
+
+    protected override void OnInitialized()
+    {
+        State.Changed += OnStateChanged;
+    }
+
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
+    protected override void OnParametersSet()
+    {
+        _activeTab = Tab.Overview;
+        _compatInfo = null;
+
+        if (State.Solution is null || State.Graph is null)
+        {
+            _packageNode = null;
+            _usagesOfThisPackage = [];
+            _projectNames = new();
+            return;
+        }
+
+        _projectNames = State.Solution.Projects.ToDictionary(p => p.Path, p => p.Name);
+
+        var decodedPackageId = PackageId is null ? null : Uri.UnescapeDataString(PackageId);
+        _packageNode = State.Graph.Nodes.OfType<PackageGraphNode>().FirstOrDefault(n => n.Package.PackageId == decodedPackageId);
+
+        _usagesOfThisPackage = (State.UsageResults ?? [])
+            .Where(u => u.TargetName == decodedPackageId)
+            .OrderBy(u => u.ProjectPath)
+            .ThenBy(u => u.FilePath)
+            .ThenBy(u => u.LineNumber)
+            .ToList();
+
+        _confirmedUsages = _usagesOfThisPackage.Count(u => u.Confidence == UsageConfidence.Confirmed);
+        _possibleUsages = _usagesOfThisPackage.Count(u => u.Confidence == UsageConfidence.TextMatch);
+        _speculativeUsages = _usagesOfThisPackage.Count(u => u.Confidence == UsageConfidence.SuffixMatch);
+    }
+
+    private string ProjectName(string projectPath) => _projectNames.GetValueOrDefault(projectPath, projectPath);
+
+    private async Task CheckCompatibilityAsync()
+    {
+        if (_packageNode is null || State.Solution is null || string.IsNullOrEmpty(PrimaryVersion) || _checking)
+        {
+            return;
+        }
+
+        _checking = true;
+        StateHasChanged();
+
+        try
+        {
+            var solutionRoot = Path.GetDirectoryName(State.Solution.Path) ?? string.Empty;
+            _compatInfo = await Checker.CheckAsync(solutionRoot, _packageNode.Package.PackageId, PrimaryVersion, TargetFrameworkMoniker, _cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // Panel navigated away mid-check - nothing left to show.
+        }
+        finally
+        {
+            _checking = false;
+            StateHasChanged();
+        }
+    }
+
+    public void Dispose()
+    {
+        State.Changed -= OnStateChanged;
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+
+    private enum Tab
+    {
+        Overview,
+        Usages,
+        Graph
+    }
+}

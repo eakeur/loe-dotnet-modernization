@@ -1,23 +1,45 @@
-﻿@inherits LayoutComponentBase
+@inherits LayoutComponentBase
+@implements IDisposable
 
-<div class="page">
-    <div class="sidebar">
-        <NavMenu />
+@* The persistent VS Code-style workbench shell: Activity Bar + Explorer (Side Bar) + Editor
+   Group + Status Bar. The Activity Bar and Side Bar only render once a solution is loaded -
+   before that, the Editor Group shows the landing "recent workspaces" screen full-bleed, the
+   same way VS Code itself shows its own Start/Welcome page (with a "Recent" list) before any
+   folder is open. Either way the outer shell chrome (title bar / status bar) stays, so it never
+   feels like a plain unstyled page even with nothing loaded yet. *@
+<div class="vsc-shell">
+    <div class="vsc-titlebar">
+        <span class="vsc-titlebar-title">
+            @(State.Solution is null ? "DotNetModAssess" : $"{System.IO.Path.GetFileNameWithoutExtension(State.Solution.Path)} — DotNetModAssess")
+        </span>
     </div>
 
-    <main>
-        <div class="top-row px-4">
-            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
-        </div>
+    <div class="vsc-workbench">
+        @if (State.Solution is not null)
+        {
+            <ActivityBar />
+            <SideBar />
+        }
+        <main class="vsc-editor-group">
+            <div class="vsc-editor-content">
+                @Body
+            </div>
+        </main>
+    </div>
 
-        <article class="content px-4">
-            @Body
-        </article>
-    </main>
+    <StatusBar />
 </div>
 
-<div id="blazor-error-ui">
-    An unhandled error has occurred.
-    <a href="" class="reload">Reload</a>
-    <a class="dismiss">🗙</a>
-</div>
+@code {
+    [Inject]
+    private SolutionStateService State { get; set; } = default!;
+
+    protected override void OnInitialized()
+    {
+        State.Changed += OnStateChanged;
+    }
+
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => State.Changed -= OnStateChanged;
+}

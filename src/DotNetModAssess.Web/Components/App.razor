@@ -11,6 +11,10 @@
     <link rel="icon" type="image/png" href="favicon.png" />
     <!-- Cytoscape.js: CDN-loaded per the project's tech-stack decision (not npm-installed/vendored). Pinned to a specific version. -->
     <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
+    <!-- Monaco Editor (the same editor VS Code itself is built on), for the read-only code viewer -
+         same CDN-load/pinned-version pattern as Cytoscape.js above. Only the AMD loader is loaded
+         eagerly; wwwroot/js/codeViewer.js lazily require()s the rest of the editor on first use. -->
+    <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
     <HeadOutlet />
 </head>
 

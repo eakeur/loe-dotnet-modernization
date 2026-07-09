@@ -1,0 +1,31 @@
+@* Small VS Code "problem"-style badge for a UsageResult's confidence tier. Centralizes the
+   badge markup that used to be copy-pasted across ProjectDetail/Findings/Packages so the four
+   panels that now show usage/finding rows (Overview findings summary, Project panel, Package
+   panel, Findings panel, Search panel) render it identically. *@
+<span class="vsc-badge vsc-badge-@CssSuffix" title="@Title">@Label</span>
+
+@code {
+    [Parameter, EditorRequired]
+    public UsageConfidence Confidence { get; set; }
+
+    private string Label => Confidence switch
+    {
+        UsageConfidence.Confirmed => "Confirmed",
+        UsageConfidence.TextMatch => "Possible",
+        _ => "Speculative"
+    };
+
+    private string CssSuffix => Confidence switch
+    {
+        UsageConfidence.Confirmed => "confirmed",
+        UsageConfidence.TextMatch => "possible",
+        _ => "speculative"
+    };
+
+    private string Title => Confidence switch
+    {
+        UsageConfidence.Confirmed => "Confirmed by Roslyn syntax analysis",
+        UsageConfidence.TextMatch => "Text match only - not confirmed by Roslyn syntax analysis",
+        _ => "Harvested partial match - high false-positive risk, verify manually"
+    };
+}

@@ -1,0 +1,60 @@
+.vsc-activitybar {
+    flex: 0 0 auto;
+    width: 48px;
+    background: var(--vsc-activitybar-bg);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-right: 1px solid var(--vsc-border-subtle);
+}
+
+.vsc-activitybar-top,
+.vsc-activitybar-bottom {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+}
+
+.vsc-activitybar-item {
+    position: relative;
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--vsc-activitybar-inactive-fg);
+    border-left: 2px solid transparent;
+    background: transparent;
+    border-top: none;
+    border-right: none;
+    border-bottom: none;
+    cursor: pointer;
+}
+
+.vsc-activitybar-item:hover {
+    color: var(--vsc-activitybar-fg);
+}
+
+.vsc-activitybar-item.active {
+    color: var(--vsc-activitybar-fg);
+    border-left-color: var(--vsc-activitybar-fg);
+}
+
+.vsc-activitybar-badge {
+    position: absolute;
+    bottom: 4px;
+    right: 4px;
+    background: var(--vsc-activitybar-badge-bg);
+    color: #ffffff;
+    font-size: 9px;
+    font-weight: 700;
+    border-radius: 8px;
+    padding: 0 4px;
+    min-width: 14px;
+    line-height: 14px;
+    text-align: center;
+}

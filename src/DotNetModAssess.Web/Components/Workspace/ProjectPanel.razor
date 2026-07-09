@@ -1,0 +1,402 @@
+@page "/workspace/project/{*ProjectPath}"
+@inject SolutionStateService State
+
+<PageTitle>@(_project?.Name ?? "Project") - DotNetModAssess</PageTitle>
+
+@if (State.Solution is null)
+{
+    <p class="vsc-muted">No solution loaded yet. <a href="/">Go open one</a>.</p>
+}
+else if (_project is null)
+{
+    <div class="vsc-alert vsc-alert-warning">
+        No project found for path <code>@(ProjectPath is null ? "" : Uri.UnescapeDataString(ProjectPath))</code>.
+    </div>
+}
+else
+{
+    <p class="vsc-breadcrumb"><a href="/workspace">Overview</a> / @_project.Name</p>
+    <div class="vsc-page-title">
+        <h1>@_project.Name</h1>
+        <span class="vsc-badge @(_project.Format == ProjectFormat.LegacyStyle ? "vsc-badge-legacy" : "vsc-badge-sdk")">@_project.Format</span>
+        <span class="vsc-badge vsc-badge-neutral">@_project.Metadata.TargetFrameworkRaw</span>
+        <span class="vsc-badge vsc-badge-neutral">@_project.OutputType</span>
+    </div>
+    <p class="vsc-page-subtitle vsc-mono">@_project.Path</p>
+
+    <div class="vsc-tabs">
+        <button class="vsc-tab @(_activeTab == Tab.Dependencies ? "active" : "")" @onclick='() => _activeTab = Tab.Dependencies'>Dependencies</button>
+        <button class="vsc-tab @(_activeTab == Tab.Packages ? "active" : "")" @onclick='() => _activeTab = Tab.Packages'>Packages</button>
+        <button class="vsc-tab @(_activeTab == Tab.Metadata ? "active" : "")" @onclick='() => _activeTab = Tab.Metadata'>Metadata</button>
+        <button class="vsc-tab @(_activeTab == Tab.Usages ? "active" : "")" @onclick='() => _activeTab = Tab.Usages'>Usages (@_confirmedUsageCount/@_possibleUsageCount/@_speculativeUsageCount)</button>
+        <button class="vsc-tab @(_activeTab == Tab.Findings ? "active" : "")" @onclick='() => _activeTab = Tab.Findings'>Findings (@_findingsForThisProject.Count)</button>
+        <button class="vsc-tab @(_activeTab == Tab.Graph ? "active" : "")" @onclick='() => _activeTab = Tab.Graph'>Graph</button>
+    </div>
+
+    <div class="vsc-tab-content">
+        @if (_activeTab == Tab.Dependencies)
+        {
+            <div class="vsc-two-col">
+                <div class="vsc-panel-block">
+                    <div class="vsc-panel-header">Depends on (@_project.ProjectReferences.Count)</div>
+                    <div class="vsc-panel-body">
+                        @if (_project.ProjectReferences.Count == 0)
+                        {
+                            <p class="vsc-muted">No project references.</p>
+                        }
+                        else
+                        {
+                            @foreach (var reference in _project.ProjectReferences)
+                            {
+                                <div class="vsc-ref-row">
+                                    <a href="@($"/workspace/project/{Uri.EscapeDataString(reference.Path)}")">@reference.Name</a>
+                                    <div class="vsc-muted vsc-small vsc-mono">@reference.Path</div>
+                                </div>
+                            }
+                        }
+                    </div>
+                </div>
+                <div class="vsc-panel-block">
+                    <div class="vsc-panel-header">Used by / dependents (@_dependents.Count)</div>
+                    <div class="vsc-panel-body">
+                        @if (_dependents.Count == 0)
+                        {
+                            <p class="vsc-muted">No other project references this one.</p>
+                        }
+                        else
+                        {
+                            @foreach (var dependent in _dependents)
+                            {
+                                <div class="vsc-ref-row">
+                                    <a href="@($"/workspace/project/{Uri.EscapeDataString(dependent.Path)}")">@dependent.Name</a>
+                                    <div class="vsc-muted vsc-small vsc-mono">@dependent.Path</div>
+                                </div>
+                            }
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+        else if (_activeTab == Tab.Packages)
+        {
+            @if (_project.PackageReferences.Count == 0)
+            {
+                <p class="vsc-muted">No package references.</p>
+            }
+            else
+            {
+                <div class="vsc-table-scroll">
+                    <table class="vsc-table">
+                        <thead>
+                            <tr>
+                                <th>Package</th>
+                                <th>Requested</th>
+                                <th>Resolved</th>
+                                <th>Centrally managed</th>
+                                <th>Floating</th>
+                                <th>Version conflict</th>
+                                <th>Usages</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var package in _project.PackageReferences)
+                            {
+                                var conflict = GetPackageConflict(package.PackageId);
+                                var (confirmedUsages, possibleUsages, speculativeUsages) = CountUsagesOfSymbolByConfidence(package.PackageId);
+                                <tr>
+                                    <td><a href="@($"/workspace/package/{Uri.EscapeDataString(package.PackageId)}")">@package.PackageId</a></td>
+                                    <td>@(package.RequestedVersion ?? "-")</td>
+                                    <td>@(package.ResolvedVersion ?? "-")</td>
+                                    <td>@(package.IsCentrallyManaged ? "Yes" : "No")</td>
+                                    <td>@(package.IsFloatingVersion ? "Yes" : "No")</td>
+                                    <td>
+                                        @if (conflict is not null)
+                                        {
+                                            <span class="vsc-badge vsc-badge-danger" title="@string.Join(", ", conflict.Package.ProjectVersions.Select(v => $"{v.ProjectPath}: {v.Version}"))">
+                                                Conflict
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <span class="vsc-muted">-</span>
+                                        }
+                                    </td>
+                                    <td>
+                                        @if (confirmedUsages == 0 && possibleUsages == 0 && speculativeUsages == 0)
+                                        {
+                                            <span class="vsc-muted">0</span>
+                                        }
+                                        else
+                                        {
+                                            @if (confirmedUsages > 0)
+                                            {
+                                                <span class="vsc-badge vsc-badge-confirmed">@confirmedUsages confirmed</span>
+                                            }
+                                            @if (possibleUsages > 0)
+                                            {
+                                                <span class="vsc-badge vsc-badge-possible">@possibleUsages possible</span>
+                                            }
+                                            @if (speculativeUsages > 0)
+                                            {
+                                                <span class="vsc-badge vsc-badge-speculative">@speculativeUsages speculative</span>
+                                            }
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        }
+        else if (_activeTab == Tab.Metadata)
+        {
+            var metadata = _project.Metadata;
+            <div class="vsc-panel-block">
+                <div class="vsc-panel-header">Summary</div>
+                <div class="vsc-panel-body">
+                    <dl class="vsc-dl">
+                        <dt>Format</dt><dd>@metadata.Format</dd>
+                        <dt>Packages model</dt><dd>@metadata.PackagesModel</dd>
+                        <dt>Centrally managed</dt><dd>@metadata.IsCentrallyManaged</dd>
+                        <dt>Target framework (raw)</dt><dd>@metadata.TargetFrameworkRaw</dd>
+                        <dt>Target framework classification</dt><dd>@metadata.TargetFrameworkClassification</dd>
+                        <dt>Output type</dt><dd>@metadata.OutputType</dd>
+                        <dt>Project type GUIDs</dt><dd>@(metadata.ProjectTypeGuids.Count == 0 ? "-" : string.Join(", ", metadata.ProjectTypeGuids))</dd>
+                        <dt>LangVersion</dt><dd>@(metadata.LangVersion ?? "-")</dd>
+                        <dt>Nullable</dt><dd>@(metadata.Nullable ?? "-")</dd>
+                        <dt>ImplicitUsings</dt><dd>@(metadata.ImplicitUsings?.ToString() ?? "-")</dd>
+                        <dt>AllowUnsafeBlocks</dt><dd>@(metadata.AllowUnsafeBlocks?.ToString() ?? "-")</dd>
+                        <dt>TreatWarningsAsErrors</dt><dd>@(metadata.TreatWarningsAsErrors?.ToString() ?? "-")</dd>
+                        <dt>DefineConstants</dt><dd>@(metadata.DefineConstants.Count == 0 ? "-" : string.Join(", ", metadata.DefineConstants))</dd>
+                        <dt>AssemblyName</dt><dd>@(metadata.AssemblyName ?? "-")</dd>
+                        <dt>RootNamespace</dt><dd>@(metadata.RootNamespace ?? "-")</dd>
+                        <dt>RuntimeIdentifiers</dt><dd>@(metadata.RuntimeIdentifiers.Count == 0 ? "-" : string.Join(", ", metadata.RuntimeIdentifiers))</dd>
+                        <dt>PlatformTarget</dt><dd>@(metadata.PlatformTarget ?? "-")</dd>
+                        <dt>UseWindowsForms / UseWpf</dt><dd>@metadata.UseWindowsForms / @metadata.UseWpf</dd>
+                        <dt>IsPackable</dt><dd>@(metadata.IsPackable?.ToString() ?? "-")</dd>
+                        <dt>IsTestProject</dt><dd>@metadata.IsTestProject @(metadata.TestFramework is not null ? $"({metadata.TestFramework})" : "")</dd>
+                        <dt>Directory.Build.props chain</dt><dd>@(metadata.DirectoryBuildPropsChain.Count == 0 ? "-" : string.Join(" -> ", metadata.DirectoryBuildPropsChain))</dd>
+                        <dt>Directory.Build.targets chain</dt><dd>@(metadata.DirectoryBuildTargetsChain.Count == 0 ? "-" : string.Join(" -> ", metadata.DirectoryBuildTargetsChain))</dd>
+                        <dt>Custom targets/imports</dt>
+                        <dd>
+                            @(metadata.CustomTargetsAndImports.Count == 0
+                                ? "-"
+                                : string.Join(", ", metadata.CustomTargetsAndImports.Select(c => $"{c.ElementType}:{c.Name}")))
+                        </dd>
+                    </dl>
+                </div>
+            </div>
+
+            <div class="vsc-panel-block">
+                <div class="vsc-panel-header">Legacy coupling signals</div>
+                <div class="vsc-panel-body">
+                    <dl class="vsc-dl">
+                        <dt>References System.Web</dt><dd>@metadata.LegacySignals.ReferencesSystemWeb</dd>
+                        <dt>References System.ServiceModel</dt><dd>@metadata.LegacySignals.ReferencesSystemServiceModel</dd>
+                        <dt>References System.Messaging</dt><dd>@metadata.LegacySignals.ReferencesSystemMessaging</dd>
+                        <dt>COM references</dt><dd>@(metadata.LegacySignals.ComReferences.Count == 0 ? "-" : string.Join(", ", metadata.LegacySignals.ComReferences))</dd>
+                        <dt>P/Invoke signals</dt><dd>@metadata.LegacySignals.HasPInvokeSignals</dd>
+                        <dt>app.config present</dt><dd>@metadata.LegacySignals.HasAppConfig</dd>
+                        <dt>web.config present</dt><dd>@metadata.LegacySignals.HasWebConfig</dd>
+                        <dt>web.config transforms</dt><dd>@metadata.LegacySignals.HasWebConfigTransforms</dd>
+                        <dt>Uses ConfigurationManager</dt><dd>@metadata.LegacySignals.UsesConfigurationManager</dd>
+                        <dt>Legacy assembly references</dt><dd>@(metadata.LegacySignals.LegacyAssemblyReferences.Count == 0 ? "-" : string.Join(", ", metadata.LegacySignals.LegacyAssemblyReferences))</dd>
+                        <dt>Windows-only assembly references</dt><dd>@(metadata.LegacySignals.WindowsOnlyAssemblyReferences.Count == 0 ? "-" : string.Join(", ", metadata.LegacySignals.WindowsOnlyAssemblyReferences))</dd>
+                    </dl>
+                </div>
+            </div>
+
+            @if (metadata.Diagnostics.Count > 0)
+            {
+                <div class="vsc-panel-block">
+                    <div class="vsc-panel-header">Evaluation diagnostics</div>
+                    <div class="vsc-panel-body">
+                        @foreach (var diagnostic in metadata.Diagnostics)
+                        {
+                            <div class="vsc-diagnostic-row">
+                                <span class="vsc-badge @(diagnostic.Severity == EvaluationDiagnosticSeverity.Error ? "vsc-badge-danger" : "vsc-badge-possible")">@diagnostic.Severity</span>
+                                <strong>@diagnostic.Code</strong>: @diagnostic.Message
+                                @if (diagnostic.File is not null)
+                                {
+                                    <div class="vsc-muted vsc-small">@diagnostic.File@(diagnostic.LineNumber is not null ? $":{diagnostic.LineNumber}" : "")</div>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+
+            <div class="vsc-panel-block">
+                <div class="vsc-panel-header">
+                    Raw MSBuild properties (@metadata.RawProperties.Count)
+                </div>
+                <div class="vsc-panel-body">
+                    <input class="vsc-input vsc-input-sm" placeholder="Search properties..." @bind="_rawPropertySearch" @bind:event="oninput" style="margin-bottom:8px;" />
+                    <div class="vsc-table-scroll">
+                        <table class="vsc-table">
+                            <thead><tr><th>Property</th><th>Value</th></tr></thead>
+                            <tbody>
+                                @foreach (var kvp in GetFilteredRawProperties(metadata))
+                                {
+                                    <tr>
+                                        <td class="vsc-mono">@kvp.Key</td>
+                                        <td class="vsc-mono">@(kvp.Value ?? "(null)")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        }
+        else if (_activeTab == Tab.Usages)
+        {
+            <p class="vsc-muted vsc-small">
+                Usages of this project's approximate namespace
+                (<code>@(_project.Metadata.RootNamespace ?? _project.Metadata.AssemblyName ?? _project.Name)</code>)
+                found across the rest of the solution's source.
+            </p>
+            <UsageResultsTable Results="_usagesOfThisProject" EmptyMessage="No usages found (or no other project references this one's namespace)." />
+        }
+        else if (_activeTab == Tab.Findings)
+        {
+            <p class="vsc-muted vsc-small">Legacy migration-blocker pattern findings attributed to this project.</p>
+            <UsageResultsTable Results="_findingsForThisProject" ShowProjectColumn="false" EmptyMessage="No legacy pattern findings for this project." />
+        }
+        else if (_activeTab == Tab.Graph)
+        {
+            @if (State.Graph is null)
+            {
+                <p class="vsc-muted">Graph not available.</p>
+            }
+            else
+            {
+                <DependencyGraphView Graph="State.Graph" Solution="State.Solution" InitialFocusNodeId="_project.Path" @key="_project.Path" />
+            }
+        }
+    </div>
+}
+
+@code {
+    [Parameter]
+    public string? ProjectPath { get; set; }
+
+    private ProjectModel? _project;
+    private List<ProjectModel> _dependents = [];
+    private List<UsageResult> _usagesOfThisProject = [];
+    private List<UsageResult> _findingsForThisProject = [];
+    private int _confirmedUsageCount;
+    private int _possibleUsageCount;
+    private int _speculativeUsageCount;
+    private Tab _activeTab = Tab.Dependencies;
+    private string _rawPropertySearch = "";
+
+    protected override void OnParametersSet()
+    {
+        _activeTab = Tab.Dependencies;
+        _rawPropertySearch = "";
+
+        if (State.Solution is null)
+        {
+            _project = null;
+            _dependents = [];
+            _usagesOfThisProject = [];
+            _findingsForThisProject = [];
+            _confirmedUsageCount = 0;
+            _possibleUsageCount = 0;
+            _speculativeUsageCount = 0;
+            return;
+        }
+
+        var decodedProjectPath = ProjectPath is null ? null : Uri.UnescapeDataString(ProjectPath);
+        _project = State.Solution.Projects.FirstOrDefault(p => p.Path == decodedProjectPath);
+        _dependents = FindDependents();
+        _usagesOfThisProject = FindUsagesOfThisProject();
+        _findingsForThisProject = (State.LegacyFindings ?? [])
+            .Where(f => f.ProjectPath == _project?.Path)
+            .OrderBy(f => f.FilePath, StringComparer.Ordinal)
+            .ThenBy(f => f.LineNumber)
+            .ToList();
+        _confirmedUsageCount = _usagesOfThisProject.Count(u => u.Confidence == UsageConfidence.Confirmed);
+        _possibleUsageCount = _usagesOfThisProject.Count(u => u.Confidence == UsageConfidence.TextMatch);
+        _speculativeUsageCount = _usagesOfThisProject.Count(u => u.Confidence == UsageConfidence.SuffixMatch);
+    }
+
+    private List<UsageResult> FindUsagesOfThisProject()
+    {
+        if (_project is null)
+        {
+            return [];
+        }
+
+        var target = _project.Metadata.RootNamespace ?? _project.Metadata.AssemblyName ?? _project.Name;
+        return MatchUsagesOfSymbol(target).ToList();
+    }
+
+    private (int Confirmed, int Possible, int Speculative) CountUsagesOfSymbolByConfidence(string symbol)
+    {
+        var matches = MatchUsagesOfSymbol(symbol).ToList();
+        return (
+            matches.Count(u => u.Confidence == UsageConfidence.Confirmed),
+            matches.Count(u => u.Confidence == UsageConfidence.TextMatch),
+            matches.Count(u => u.Confidence == UsageConfidence.SuffixMatch));
+    }
+
+    private IEnumerable<UsageResult> MatchUsagesOfSymbol(string symbol) =>
+        (State.UsageResults ?? [])
+            .Where(u => u.TargetName == symbol)
+            .OrderBy(u => u.ProjectPath)
+            .ThenBy(u => u.FilePath)
+            .ThenBy(u => u.LineNumber);
+
+    private List<ProjectModel> FindDependents()
+    {
+        if (_project is null || State.Graph is null || State.Solution is null)
+        {
+            return [];
+        }
+
+        var projectsByPath = State.Solution.Projects.ToDictionary(p => p.Path);
+
+        return State.Graph.Edges
+            .Where(e => e.Kind == GraphEdgeKind.ProjectToProject && e.ToId == _project.Path)
+            .Select(e => projectsByPath.GetValueOrDefault(e.FromId))
+            .Where(p => p is not null)
+            .Select(p => p!)
+            .ToList();
+    }
+
+    private PackageGraphNode? GetPackageConflict(string packageId)
+    {
+        var node = State.Graph?.Nodes
+            .OfType<PackageGraphNode>()
+            .FirstOrDefault(n => n.Package.PackageId == packageId);
+
+        return node?.Package.HasVersionConflict == true ? node : null;
+    }
+
+    private IEnumerable<KeyValuePair<string, string?>> GetFilteredRawProperties(ProjectMetadata metadata)
+    {
+        if (string.IsNullOrWhiteSpace(_rawPropertySearch))
+        {
+            return metadata.RawProperties.OrderBy(kvp => kvp.Key);
+        }
+
+        return metadata.RawProperties
+            .Where(kvp =>
+                kvp.Key.Contains(_rawPropertySearch, StringComparison.OrdinalIgnoreCase) ||
+                (kvp.Value?.Contains(_rawPropertySearch, StringComparison.OrdinalIgnoreCase) ?? false))
+            .OrderBy(kvp => kvp.Key);
+    }
+
+    private enum Tab
+    {
+        Dependencies,
+        Packages,
+        Metadata,
+        Usages,
+        Findings,
+        Graph
+    }
+}

@@ -1,0 +1,59 @@
+@* VS Code's "Status Bar": thin strip along the very bottom showing at-a-glance state about the
+   open workspace - here, the loaded solution's name/watch status on the left and a findings
+   count (styled like VS Code's own Problems count) plus any in-progress loading stage on the
+   right. *@
+@implements IDisposable
+
+<footer class="vsc-statusbar">
+    <div class="vsc-statusbar-left">
+        @if (State.Solution is not null)
+        {
+            <span class="vsc-statusbar-item">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 4h6l2 2h10v13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4z"/></svg>
+                @System.IO.Path.GetFileName(State.Solution.Path)
+            </span>
+            @if (State.IsWatching)
+            {
+                <span class="vsc-statusbar-item">&#9679; Watching for changes</span>
+            }
+        }
+        else
+        {
+            <span class="vsc-statusbar-item">No workspace open</span>
+        }
+        @if (State.LastError is not null)
+        {
+            <span class="vsc-statusbar-item vsc-statusbar-error">Load failed: @State.LastError</span>
+        }
+    </div>
+    <div class="vsc-statusbar-right">
+        @if (State.IsLoading)
+        {
+            <span class="vsc-statusbar-item">
+                <span class="vsc-spinner"></span>
+                @State.LoadingStageMessage
+            </span>
+        }
+        else if (State.LegacyFindings is not null)
+        {
+            <a class="vsc-statusbar-item vsc-statusbar-link" href="/workspace/findings">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l9 16H3l9-16z"/></svg>
+                @State.LegacyFindings.Count finding@(State.LegacyFindings.Count == 1 ? "" : "s")
+            </a>
+        }
+    </div>
+</footer>
+
+@code {
+    [Inject]
+    private SolutionStateService State { get; set; } = default!;
+
+    protected override void OnInitialized()
+    {
+        State.Changed += OnStateChanged;
+    }
+
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => State.Changed -= OnStateChanged;
+}

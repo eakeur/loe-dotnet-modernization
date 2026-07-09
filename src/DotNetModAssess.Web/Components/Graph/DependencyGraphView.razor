@@ -59,6 +59,16 @@
     [Parameter]
     public SolutionModel? Solution { get; set; }
 
+    /// <summary>
+    /// Optional - a node id (project path or package id) to focus as soon as the graph finishes
+    /// initializing, for "show the dependency graph rooted at this project/package" panels (the
+    /// Project/Package detail panels). Reuses the exact same click-to-focus logic
+    /// <see cref="OnNodeClicked"/> already implements for a real click, rather than duplicating
+    /// the transitive-closure/highlight call.
+    /// </summary>
+    [Parameter]
+    public string? InitialFocusNodeId { get; set; }
+
     [Inject]
     private IJSRuntime JS { get; set; } = default!;
 
@@ -109,6 +119,11 @@
         _projectFilter = "";
         _packageFilter = "";
         _tfmFilter = "";
+
+        if (!string.IsNullOrEmpty(InitialFocusNodeId))
+        {
+            await OnNodeClicked(InitialFocusNodeId);
+        }
     }
 
     /// <summary>

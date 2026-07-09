@@ -1,0 +1,35 @@
+.vsc-tfm-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--vsc-border-subtle);
+}
+
+.vsc-tfm-row:last-child {
+    border-bottom: none;
+}
+
+.vsc-findings-summary-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--vsc-border-subtle);
+    color: var(--vsc-fg);
+}
+
+.vsc-findings-summary-row:hover {
+    color: var(--vsc-link);
+    text-decoration: none;
+}
+
+.vsc-findings-summary-row:last-child {
+    border-bottom: none;
+}
+
+.vsc-export-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}

@@ -1,0 +1,74 @@
+@* Reusable results table for a list of UsageResult rows - used by the Overview findings summary,
+   Project panel's Usages/Findings tabs, Package panel's Usages tab, the solution-wide Findings
+   panel, and the ad-hoc Search panel, all of which used to duplicate this exact table markup.
+   Every "File" cell is a "view source" link into the read-only code viewer at that line. *@
+@if (Results is null || Results.Count == 0)
+{
+    <p class="vsc-muted">@EmptyMessage</p>
+}
+else
+{
+    <div class="vsc-table-scroll">
+        <table class="vsc-table">
+            <thead>
+                <tr>
+                    <th>Confidence</th>
+                    @if (ShowProjectColumn)
+                    {
+                        <th>Project</th>
+                    }
+                    <th>File</th>
+                    <th>Line</th>
+                    <th>Kind</th>
+                    <th>Matched symbol</th>
+                    <th>Snippet</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var result in Results)
+                {
+                    <tr>
+                        <td><ConfidenceBadge Confidence="result.Confidence" /></td>
+                        @if (ShowProjectColumn)
+                        {
+                            <td class="vsc-mono vsc-muted">@(result.ProjectPath is null ? "-" : ResolveProjectName(result.ProjectPath))</td>
+                        }
+                        <td>
+                            <a class="vsc-file-link" href="@BuildFileViewerUrl(result)" title="View source">
+                                <span class="vsc-codicon">&#128196;</span>@System.IO.Path.GetFileName(result.FilePath)
+                            </a>
+                            <div class="vsc-mono vsc-muted vsc-small">@result.FilePath</div>
+                        </td>
+                        <td>@result.LineNumber</td>
+                        <td>@result.Kind</td>
+                        <td class="vsc-mono">@result.MatchedSymbol</td>
+                        <td class="vsc-mono vsc-small">@result.CodeSnippet</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public IReadOnlyList<UsageResult>? Results { get; set; }
+
+    [Parameter]
+    public bool ShowProjectColumn { get; set; } = true;
+
+    [Parameter]
+    public string EmptyMessage { get; set; } = "No results.";
+
+    /// <summary>Optional project-path -> display-name lookup (e.g. Package panel resolves paths
+    /// to short project names the same way the old Packages.razor did). Falls back to the raw
+    /// path when not supplied.</summary>
+    [Parameter]
+    public Func<string, string>? ResolveProjectDisplayName { get; set; }
+
+    private string ResolveProjectName(string projectPath) =>
+        ResolveProjectDisplayName?.Invoke(projectPath) ?? projectPath;
+
+    private static string BuildFileViewerUrl(UsageResult result) =>
+        $"/workspace/file?path={Uri.EscapeDataString(result.FilePath)}&line={result.LineNumber}";
+}

@@ -1,0 +1,130 @@
+@* VS Code's "Side Bar": here, a persistent Explorer-style tree of every project and package in
+   the loaded solution. This never disappears once a workspace is open - clicking an item updates
+   the Editor Group (@Body in MainLayout) via normal navigation, but this component itself stays
+   mounted the whole time, which is the core "IDE" feel the redesign is going for. *@
+@inject NavigationManager Nav
+@implements IDisposable
+
+<aside class="vsc-sidebar" aria-label="Explorer">
+    <div class="vsc-sidebar-header">
+        <span>Explorer</span>
+    </div>
+
+    <div class="vsc-sidebar-workspace-name" title="@SolutionPath">
+        @SolutionName
+        @if (State.IsWatching)
+        {
+            <span class="vsc-live-dot" title="Watching for file changes"></span>
+        }
+    </div>
+
+    <div class="vsc-sidebar-filter">
+        <input class="vsc-input vsc-input-sm" placeholder="Filter projects/packages..." @bind="_filter" @bind:event="oninput" />
+    </div>
+
+    <div class="vsc-sidebar-scroll">
+        <div class="vsc-tree-section">
+            <button class="vsc-tree-section-header" @onclick="() => _projectsExpanded = !_projectsExpanded">
+                <span class="vsc-tree-chevron @(_projectsExpanded ? "expanded" : "")">&#9656;</span>
+                PROJECTS
+                <span class="vsc-tree-count">@FilteredProjects.Count</span>
+            </button>
+            @if (_projectsExpanded)
+            {
+                <ul class="vsc-tree-list">
+                    @foreach (var project in FilteredProjects)
+                    {
+                        var href = $"/workspace/project/{Uri.EscapeDataString(project.Path)}";
+                        <li>
+                            <a class="vsc-tree-item @(IsActive(href) ? "active" : "")" href="@href" title="@project.Path">
+                                <span class="vsc-tree-icon vsc-tree-icon-project">@(project.Format == ProjectFormat.LegacyStyle ? "!" : "C#")</span>
+                                <span class="vsc-tree-label">@project.Name</span>
+                            </a>
+                        </li>
+                    }
+                    @if (FilteredProjects.Count == 0)
+                    {
+                        <li class="vsc-tree-empty">No matching projects.</li>
+                    }
+                </ul>
+            }
+        </div>
+
+        <div class="vsc-tree-section">
+            <button class="vsc-tree-section-header" @onclick="() => _packagesExpanded = !_packagesExpanded">
+                <span class="vsc-tree-chevron @(_packagesExpanded ? "expanded" : "")">&#9656;</span>
+                PACKAGES
+                <span class="vsc-tree-count">@FilteredPackages.Count</span>
+            </button>
+            @if (_packagesExpanded)
+            {
+                <ul class="vsc-tree-list">
+                    @foreach (var package in FilteredPackages)
+                    {
+                        var href = $"/workspace/package/{Uri.EscapeDataString(package.Package.PackageId)}";
+                        <li>
+                            <a class="vsc-tree-item @(IsActive(href) ? "active" : "")" href="@href" title="@package.Package.PackageId">
+                                <span class="vsc-tree-icon vsc-tree-icon-package">P</span>
+                                <span class="vsc-tree-label">@package.Package.PackageId</span>
+                                @if (package.Package.HasVersionConflict)
+                                {
+                                    <span class="vsc-tree-conflict-dot" title="Version conflict"></span>
+                                }
+                            </a>
+                        </li>
+                    }
+                    @if (FilteredPackages.Count == 0)
+                    {
+                        <li class="vsc-tree-empty">No matching packages.</li>
+                    }
+                </ul>
+            }
+        </div>
+    </div>
+</aside>
+
+@code {
+    [Inject]
+    private SolutionStateService State { get; set; } = default!;
+
+    private string _filter = "";
+    private bool _projectsExpanded = true;
+    private bool _packagesExpanded = true;
+
+    private string SolutionName => State.Solution is null ? "" : System.IO.Path.GetFileName(State.Solution.Path);
+    private string SolutionPath => State.Solution?.Path ?? "";
+
+    private List<ProjectModel> FilteredProjects =>
+        (State.Solution?.Projects ?? [])
+            .Where(p => string.IsNullOrWhiteSpace(_filter) ||
+                        p.Name.Contains(_filter, StringComparison.OrdinalIgnoreCase) ||
+                        p.Path.Contains(_filter, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private List<PackageGraphNode> FilteredPackages =>
+        (State.Graph?.Nodes.OfType<PackageGraphNode>() ?? [])
+            .Where(p => string.IsNullOrWhiteSpace(_filter) || p.Package.PackageId.Contains(_filter, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(p => p.Package.PackageId, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    protected override void OnInitialized()
+    {
+        State.Changed += OnStateChanged;
+        Nav.LocationChanged += OnLocationChanged;
+    }
+
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e) =>
+        InvokeAsync(StateHasChanged);
+
+    private bool IsActive(string href) =>
+        Nav.ToBaseRelativePath(Nav.Uri).Equals(href.TrimStart('/'), StringComparison.OrdinalIgnoreCase);
+
+    public void Dispose()
+    {
+        State.Changed -= OnStateChanged;
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+}
