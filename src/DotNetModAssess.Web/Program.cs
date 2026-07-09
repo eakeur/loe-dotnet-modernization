@@ -1,4 +1,5 @@
 using DotNetModAssess.Core.Graph;
+using DotNetModAssess.Core.LegacyPatterns;
 using DotNetModAssess.Core.Parsing;
 using DotNetModAssess.Core.Reporting;
 using DotNetModAssess.Core.UsageScanning;
@@ -19,6 +20,16 @@ builder.Services.AddScoped<IUsageScanner, RoslynUsageScanner>();
 builder.Services.AddScoped<IReportExporter, MarkdownJsonReportExporter>();
 builder.Services.AddScoped<IGraphExporter, DotMermaidGraphExporter>();
 builder.Services.AddScoped<SolutionStateService>();
+
+// Legacy-pattern (WCF/WPF/ConfigurationManager/AppDomain/COM Interop) migration-blocker
+// detectors, fanned out by LegacyPatternScanner - a separate, complementary scan from the
+// generic project/package usage scanner above. See LegacyPatterns/ILegacyPatternDetector.cs.
+builder.Services.AddScoped<ILegacyPatternDetector, WcfPatternDetector>();
+builder.Services.AddScoped<ILegacyPatternDetector, WpfPatternDetector>();
+builder.Services.AddScoped<ILegacyPatternDetector, ConfigurationManagerPatternDetector>();
+builder.Services.AddScoped<ILegacyPatternDetector, AppDomainPatternDetector>();
+builder.Services.AddScoped<ILegacyPatternDetector, ComInteropPatternDetector>();
+builder.Services.AddScoped<ILegacyPatternScanner, LegacyPatternScanner>();
 
 var app = builder.Build();
 

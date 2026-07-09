@@ -1,0 +1,175 @@
+@page "/findings"
+@using DotNetModAssess.Core.LegacyPatterns
+@inject ILegacyPatternScanner Scanner
+@inject SolutionStateService State
+@implements IDisposable
+
+<PageTitle>Legacy Pattern Findings</PageTitle>
+
+<h1>Legacy Pattern Findings</h1>
+
+@if (State.Solution is null)
+{
+    <p class="text-muted">No solution loaded yet. <a href="/">Go load one</a>.</p>
+}
+else
+{
+    <p class="text-muted">
+        Scans the loaded solution for five well-known, specific .NET Framework/Windows-coupled
+        migration blockers - WCF, WPF, ConfigurationManager, AppDomain, and COM Interop - and
+        reports exactly where each one shows up (file/line, or project-level for a couple of
+        findings that don't have a source location). This is a different question from the
+        Usages tab on a project's page: that asks "how much is project/package X used elsewhere",
+        this asks "does this solution use any of these specific, well-known idioms, and where."
+    </p>
+
+    <button class="btn btn-primary mb-3" @onclick="RunScanAsync" disabled="@_isScanning">
+        @(_isScanning ? "Scanning..." : "Scan for legacy patterns")
+    </button>
+
+    @if (_error is not null)
+    {
+        <div class="alert alert-danger">@_error</div>
+    }
+
+    @if (_results is not null)
+    {
+        @if (_results.Count == 0)
+        {
+            <p class="text-muted">No legacy patterns detected across any registered detector.</p>
+        }
+        else
+        {
+            @foreach (var group in _resultsByPattern)
+            {
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <strong>@group.PatternName</strong>
+                        <span class="badge bg-secondary ms-2">@group.Results.Count finding@(group.Results.Count == 1 ? "" : "s")</span>
+                        <div class="text-muted small mt-1">@group.Description</div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Confidence</th>
+                                    <th>Project</th>
+                                    <th>File</th>
+                                    <th>Line</th>
+                                    <th>Kind</th>
+                                    <th>Matched symbol</th>
+                                    <th>Snippet</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var finding in group.Results)
+                                {
+                                    <tr>
+                                        <td>
+                                            @if (finding.Confidence == UsageConfidence.Confirmed)
+                                            {
+                                                <span class="badge bg-success">Confirmed</span>
+                                            }
+                                            else if (finding.Confidence == UsageConfidence.TextMatch)
+                                            {
+                                                <span class="badge bg-warning text-dark">Possible</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="badge border border-secondary text-secondary">Speculative</span>
+                                            }
+                                        </td>
+                                        <td>@(finding.ProjectPath is null ? "-" : finding.ProjectPath)</td>
+                                        <td><code>@finding.FilePath</code></td>
+                                        <td>@finding.LineNumber</td>
+                                        <td>@finding.Kind</td>
+                                        <td><code>@finding.MatchedSymbol</code></td>
+                                        <td><code>@finding.CodeSnippet</code></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            }
+        }
+    }
+}
+
+@code {
+    private IReadOnlyList<UsageResult>? _results;
+    private List<PatternGroup> _resultsByPattern = [];
+    private bool _isScanning;
+    private string? _error;
+    private CancellationTokenSource? _cts;
+
+    protected override void OnInitialized()
+    {
+        State.Changed += OnStateChanged;
+    }
+
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
+    private async Task RunScanAsync()
+    {
+        if (State.Solution is null || _isScanning)
+        {
+            return;
+        }
+
+        _isScanning = true;
+        _error = null;
+        _results = null;
+        _resultsByPattern = [];
+        StateHasChanged();
+
+        _cts = new CancellationTokenSource();
+
+        try
+        {
+            var results = await Scanner.ScanAsync(State.Solution, _cts.Token);
+            _results = results;
+            _resultsByPattern = results
+                .GroupBy(r => r.TargetName)
+                .Select(g => new PatternGroup(
+                    g.Key,
+                    DescriptionsByPatternName.GetValueOrDefault(g.Key, string.Empty),
+                    g.OrderBy(r => r.FilePath, StringComparer.Ordinal).ThenBy(r => r.LineNumber).ToList()))
+                .OrderBy(g => g.PatternName, StringComparer.Ordinal)
+                .ToList();
+        }
+        catch (OperationCanceledException)
+        {
+            // Page navigated away / disposed mid-scan - nothing to show.
+        }
+        catch (Exception ex)
+        {
+            _error = $"Scan failed: {ex.Message}";
+        }
+        finally
+        {
+            _isScanning = false;
+            StateHasChanged();
+        }
+    }
+
+    // Descriptions come from the same detectors registered in DI, captured once so the grouped
+    // table headers can show each pattern's "why this matters" line without re-instantiating
+    // detectors outside the scanner. Populated lazily from the scan's own detector set would
+    // require exposing detectors directly; simplest is to inject them here too since they're
+    // cheap, stateless singletons-by-registration.
+    [Inject]
+    private IEnumerable<ILegacyPatternDetector> Detectors { get; set; } = null!;
+
+    private Dictionary<string, string> DescriptionsByPatternName =>
+        Detectors.ToDictionary(d => d.PatternName, d => d.Description);
+
+    private sealed record PatternGroup(string PatternName, string Description, List<UsageResult> Results);
+
+    public void Dispose()
+    {
+        State.Changed -= OnStateChanged;
+        _cts?.Cancel();
+        _cts?.Dispose();
+    }
+}

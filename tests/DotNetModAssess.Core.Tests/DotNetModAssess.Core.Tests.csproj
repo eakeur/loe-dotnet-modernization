@@ -51,6 +51,14 @@
          names used purely to exercise syntax-level matching). -->
     <Compile Remove="UsageScanningFixtures\**\*.cs" />
     <None Include="UsageScanningFixtures\**\*.cs" />
+
+    <!-- Same convention as UsageScanningFixtures above, for the LegacyPatterns detector tests:
+         these are inputs fed to CSharpSyntaxTree.ParseText, not code compiled into this test
+         assembly (several intentionally reference types - ServiceHost, ChannelFactory<T>,
+         MarshalByRefObject-derived stubs, etc. - that aren't actually available/defined here,
+         since only their syntax shape matters for detection). -->
+    <Compile Remove="LegacyPatternsFixtures\**\*.cs" />
+    <None Include="LegacyPatternsFixtures\**\*.cs" />
   </ItemGroup>
 
 </Project>
