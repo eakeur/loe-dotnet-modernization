@@ -1,5 +1,6 @@
 using DotNetModAssess.Core.Graph;
 using DotNetModAssess.Core.LegacyPatterns;
+using DotNetModAssess.Core.PackageCompatibility;
 using DotNetModAssess.Core.Parsing;
 using DotNetModAssess.Core.Reporting;
 using DotNetModAssess.Core.UsageScanning;
@@ -20,6 +21,12 @@ builder.Services.AddScoped<IUsageScanner, RoslynUsageScanner>();
 builder.Services.AddScoped<IReportExporter, MarkdownJsonReportExporter>();
 builder.Services.AddScoped<IGraphExporter, DotMermaidGraphExporter>();
 builder.Services.AddScoped<SolutionStateService>();
+
+// Singleton, not Scoped like the services above: NuGetCompatibilityChecker holds no per-circuit
+// state of its own (its only state is a deliberately process-lifetime result cache - see its doc
+// comment), so one shared instance across every circuit is simpler than a new one per connection
+// for no benefit.
+builder.Services.AddSingleton<INuGetCompatibilityChecker, NuGetCompatibilityChecker>();
 
 // Legacy-pattern (WCF/WPF/ConfigurationManager/AppDomain/COM Interop) migration-blocker
 // detectors, fanned out by LegacyPatternScanner - a separate, complementary scan from the
