@@ -1,6 +1,7 @@
 using DotNetModAssess.Core.Models;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.Extensions.Logging;
 
 namespace DotNetModAssess.Core.LegacyPatterns;
 
@@ -29,7 +30,7 @@ namespace DotNetModAssess.Core.LegacyPatterns;
 /// module's spec calls for, without ever emitting a finding purely from that boolean.</item>
 /// </list>
 /// </summary>
-public sealed class WpfPatternDetector : ILegacyPatternDetector
+public sealed class WpfPatternDetector(ILogger<WpfPatternDetector>? logger = null) : ILegacyPatternDetector
 {
     public string PatternName => "WPF";
 
@@ -47,6 +48,7 @@ public sealed class WpfPatternDetector : ILegacyPatternDetector
     public async Task<IReadOnlyList<UsageResult>> DetectAsync(SolutionModel solution, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(solution);
+        logger?.LogDebug("Running {PatternName} detector across {ProjectCount} projects", PatternName, solution.Projects.Count);
         var results = new List<UsageResult>();
 
         foreach (var project in solution.Projects)
@@ -75,6 +77,7 @@ public sealed class WpfPatternDetector : ILegacyPatternDetector
             }
         }
 
+        logger?.LogInformation("{PatternName} detector found {FindingCount} findings", PatternName, results.Count);
         return results;
     }
 

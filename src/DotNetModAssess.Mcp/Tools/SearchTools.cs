@@ -2,6 +2,8 @@ using System.ComponentModel;
 using DotNetModAssess.Core.Search;
 using DotNetModAssess.Mcp.Dtos;
 using DotNetModAssess.Mcp.Services;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using ModelContextProtocol.Server;
 
 namespace DotNetModAssess.Mcp.Tools;
@@ -24,8 +26,11 @@ public static class SearchTools
         IAdHocSourceSearcher searcher,
         [Description("The free-text query to search for across the solution's source.")]
         string query,
+        ILoggerFactory? loggerFactory = null,
         CancellationToken cancellationToken = default)
     {
+        var logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger("DotNetModAssess.Mcp.Tools.SearchTools");
+        logger.LogDebug("Tool invoked: search (query={Query})", query);
         var solution = await WorkspaceGuard.EnsureLoadedAsync(state, cancellationToken);
 
         var results = await searcher.SearchAsync(solution, query, cancellationToken);

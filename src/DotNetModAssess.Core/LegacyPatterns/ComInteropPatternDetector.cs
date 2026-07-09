@@ -1,6 +1,7 @@
 using DotNetModAssess.Core.Models;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.Extensions.Logging;
 
 namespace DotNetModAssess.Core.LegacyPatterns;
 
@@ -32,7 +33,7 @@ namespace DotNetModAssess.Core.LegacyPatterns;
 /// source-level attribute findings above.</item>
 /// </list>
 /// </summary>
-public sealed class ComInteropPatternDetector : ILegacyPatternDetector
+public sealed class ComInteropPatternDetector(ILogger<ComInteropPatternDetector>? logger = null) : ILegacyPatternDetector
 {
     public string PatternName => "COM Interop";
 
@@ -50,6 +51,7 @@ public sealed class ComInteropPatternDetector : ILegacyPatternDetector
     public async Task<IReadOnlyList<UsageResult>> DetectAsync(SolutionModel solution, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(solution);
+        logger?.LogDebug("Running {PatternName} detector across {ProjectCount} projects", PatternName, solution.Projects.Count);
         var results = new List<UsageResult>();
 
         foreach (var project in solution.Projects)
@@ -78,6 +80,7 @@ public sealed class ComInteropPatternDetector : ILegacyPatternDetector
             }
         }
 
+        logger?.LogInformation("{PatternName} detector found {FindingCount} findings", PatternName, results.Count);
         return results;
     }
 

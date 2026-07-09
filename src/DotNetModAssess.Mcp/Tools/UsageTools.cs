@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using DotNetModAssess.Mcp.Dtos;
 using DotNetModAssess.Mcp.Services;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using ModelContextProtocol.Server;
 
 namespace DotNetModAssess.Mcp.Tools;
@@ -27,8 +29,11 @@ public static class UsageTools
         McpWorkspaceState state,
         [Description("The exact project namespace/assembly-name or package id to find usages of, matched against each UsageResult's TargetName.")]
         string target,
+        ILoggerFactory? loggerFactory = null,
         CancellationToken cancellationToken = default)
     {
+        var logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger("DotNetModAssess.Mcp.Tools.UsageTools");
+        logger.LogDebug("Tool invoked: find_usages (target={Target})", target);
         await WorkspaceGuard.EnsureLoadedAsync(state, cancellationToken);
 
         return (state.UsageResults ?? [])

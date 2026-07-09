@@ -1,6 +1,7 @@
 using DotNetModAssess.Core.Models;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.Extensions.Logging;
 
 namespace DotNetModAssess.Core.LegacyPatterns;
 
@@ -24,7 +25,7 @@ namespace DotNetModAssess.Core.LegacyPatterns;
 /// already has <c>System</c> in scope). Both identifiers are also rare enough in real code that the
 /// bare-identifier collision risk this module accepts elsewhere is negligible here.</para>
 /// </summary>
-public sealed class AppDomainPatternDetector : ILegacyPatternDetector
+public sealed class AppDomainPatternDetector(ILogger<AppDomainPatternDetector>? logger = null) : ILegacyPatternDetector
 {
     public string PatternName => "AppDomain";
 
@@ -42,6 +43,7 @@ public sealed class AppDomainPatternDetector : ILegacyPatternDetector
     public async Task<IReadOnlyList<UsageResult>> DetectAsync(SolutionModel solution, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(solution);
+        logger?.LogDebug("Running {PatternName} detector across {ProjectCount} projects", PatternName, solution.Projects.Count);
         var results = new List<UsageResult>();
 
         foreach (var project in solution.Projects)
@@ -55,6 +57,7 @@ public sealed class AppDomainPatternDetector : ILegacyPatternDetector
             }
         }
 
+        logger?.LogInformation("{PatternName} detector found {FindingCount} findings", PatternName, results.Count);
         return results;
     }
 

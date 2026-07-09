@@ -1,6 +1,7 @@
 using DotNetModAssess.Core.Models;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.Extensions.Logging;
 
 namespace DotNetModAssess.Core.LegacyPatterns;
 
@@ -32,7 +33,7 @@ namespace DotNetModAssess.Core.LegacyPatterns;
 /// reference.</item>
 /// </list>
 /// </summary>
-public sealed class WcfPatternDetector : ILegacyPatternDetector
+public sealed class WcfPatternDetector(ILogger<WcfPatternDetector>? logger = null) : ILegacyPatternDetector
 {
     public string PatternName => "WCF";
 
@@ -54,6 +55,7 @@ public sealed class WcfPatternDetector : ILegacyPatternDetector
     public async Task<IReadOnlyList<UsageResult>> DetectAsync(SolutionModel solution, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(solution);
+        logger?.LogDebug("Running {PatternName} detector across {ProjectCount} projects", PatternName, solution.Projects.Count);
         var results = new List<UsageResult>();
 
         foreach (var project in solution.Projects)
@@ -67,6 +69,7 @@ public sealed class WcfPatternDetector : ILegacyPatternDetector
             }
         }
 
+        logger?.LogInformation("{PatternName} detector found {FindingCount} findings", PatternName, results.Count);
         return results;
     }
 

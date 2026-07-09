@@ -1,4 +1,5 @@
 using DotNetModAssess.Core.Models;
+using Microsoft.Extensions.Logging;
 
 namespace DotNetModAssess.Core.LegacyPatterns;
 
@@ -21,18 +22,25 @@ public interface ILegacyPatternScanner
 /// <summary>Default implementation: just fans out to every registered detector and concatenates
 /// results. Deliberately trivial - the actual detection logic belongs in each
 /// <see cref="ILegacyPatternDetector"/>, not here.</summary>
-public sealed class LegacyPatternScanner(IEnumerable<ILegacyPatternDetector> detectors) : ILegacyPatternScanner
+public sealed class LegacyPatternScanner(IEnumerable<ILegacyPatternDetector> detectors, ILogger<LegacyPatternScanner>? logger = null) : ILegacyPatternScanner
 {
     public async Task<IReadOnlyList<UsageResult>> ScanAsync(SolutionModel solution, IProgress<string>? progress = null, CancellationToken cancellationToken = default)
     {
+        logger?.LogInformation("Starting legacy-pattern scan for solution {SolutionPath}", solution.Path);
+
         var results = new List<UsageResult>();
 
         foreach (var detector in detectors)
         {
             cancellationToken.ThrowIfCancellationRequested();
             progress?.Report($"Running {detector.PatternName} detector...");
-            results.AddRange(await detector.DetectAsync(solution, cancellationToken).ConfigureAwait(false));
+
+            var detectorResults = await detector.DetectAsync(solution, cancellationToken).ConfigureAwait(false);
+            logger?.LogDebug("Detector {PatternName} found {FindingCount} findings", detector.PatternName, detectorResults.Count);
+            results.AddRange(detectorResults);
         }
+
+        logger?.LogInformation("Completed legacy-pattern scan for solution {SolutionPath}: {FindingCount} total findings", solution.Path, results.Count);
 
         return results;
     }

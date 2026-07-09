@@ -1,5 +1,6 @@
 using Buildalyzer;
 using DotNetModAssess.Core.Models;
+using Microsoft.Extensions.Logging;
 
 namespace DotNetModAssess.Core.Parsing.Internal;
 
@@ -24,6 +25,7 @@ internal sealed class SolutionGraphBuilder
 {
     private readonly IAnalyzerManager _manager;
     private readonly string _solutionRoot;
+    private readonly ILogger? _logger;
     private readonly Dictionary<string, ProjectModel> _built = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _inProgress = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _explicitTypeGuidsByPath = new(StringComparer.OrdinalIgnoreCase);
@@ -31,10 +33,11 @@ internal sealed class SolutionGraphBuilder
     public HashSet<string> AllDirectoryBuildPropsFilesEncountered { get; } = new(StringComparer.OrdinalIgnoreCase);
     public HashSet<string> AllDirectoryBuildTargetsFilesEncountered { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-    public SolutionGraphBuilder(IAnalyzerManager manager, string solutionRoot)
+    public SolutionGraphBuilder(IAnalyzerManager manager, string solutionRoot, ILogger? logger = null)
     {
         _manager = manager;
         _solutionRoot = solutionRoot;
+        _logger = logger;
     }
 
     public void EnsureProjectBuilt(string projectPath, string? projectTypeGuidRaw)
@@ -120,7 +123,7 @@ internal sealed class SolutionGraphBuilder
         foreach (var f in directoryBuildPropsChain) AllDirectoryBuildPropsFilesEncountered.Add(f);
         foreach (var f in directoryBuildTargetsChain) AllDirectoryBuildTargetsFilesEncountered.Add(f);
 
-        var evaluation = EvaluationCache.GetOrEvaluate(_manager, projectPath);
+        var evaluation = EvaluationCache.GetOrEvaluate(_manager, projectPath, _logger);
 
         var isCentrallyManaged = DetermineIsCentrallyManaged(evaluation, directoryBuildPropsChain);
         var nearestDirectoryPackagesProps = DirectoryBuildFileWalker.FindNearestDirectoryPackagesProps(projectDirectory, _solutionRoot);

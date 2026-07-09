@@ -3,6 +3,8 @@ using DotNetModAssess.Core.Graph;
 using DotNetModAssess.Core.Models;
 using DotNetModAssess.Mcp.Dtos;
 using DotNetModAssess.Mcp.Services;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using ModelContextProtocol.Server;
 
 namespace DotNetModAssess.Mcp.Tools;
@@ -21,7 +23,12 @@ public static class WorkspaceTools
         "instead of blocking on a data tool. Every other tool in this server already waits " +
         "internally for loading to finish before returning, so you do not need to poll this before " +
         "calling them - it's for visibility only.")]
-    public static LoadStatusSnapshot GetLoadStatus(McpWorkspaceState state) => state.GetLoadStatusSnapshot();
+    public static LoadStatusSnapshot GetLoadStatus(McpWorkspaceState state, ILoggerFactory? loggerFactory = null)
+    {
+        var logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger("DotNetModAssess.Mcp.Tools.WorkspaceTools");
+        logger.LogDebug("Tool invoked: get_load_status");
+        return state.GetLoadStatusSnapshot();
+    }
 
     [McpServerTool(Name = "get_solution_overview", ReadOnly = true)]
     [Description(
@@ -32,8 +39,10 @@ public static class WorkspaceTools
         "findings (WCF/WPF/ConfigurationManager/AppDomain/COM interop) grouped by pattern. Use this " +
         "as the first call when starting an assessment, to get oriented before drilling into " +
         "individual projects/packages/findings.")]
-    public static async Task<SolutionOverviewDto> GetSolutionOverview(McpWorkspaceState state, CancellationToken cancellationToken = default)
+    public static async Task<SolutionOverviewDto> GetSolutionOverview(McpWorkspaceState state, ILoggerFactory? loggerFactory = null, CancellationToken cancellationToken = default)
     {
+        var logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger("DotNetModAssess.Mcp.Tools.WorkspaceTools");
+        logger.LogDebug("Tool invoked: get_solution_overview");
         var solution = await WorkspaceGuard.EnsureLoadedAsync(state, cancellationToken);
         var graph = state.Graph;
 
@@ -79,8 +88,10 @@ public static class WorkspaceTools
         "the loaded data is fresh right now, rather than waiting for the watcher's debounce. Waits " +
         "for the reload to finish before returning, then reports the same status get_load_status " +
         "would.")]
-    public static async Task<LoadStatusSnapshot> Reload(McpWorkspaceState state, CancellationToken cancellationToken = default)
+    public static async Task<LoadStatusSnapshot> Reload(McpWorkspaceState state, ILoggerFactory? loggerFactory = null, CancellationToken cancellationToken = default)
     {
+        var logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger("DotNetModAssess.Mcp.Tools.WorkspaceTools");
+        logger.LogDebug("Tool invoked: reload");
         await state.ReloadAsync(cancellationToken);
         return state.GetLoadStatusSnapshot();
     }

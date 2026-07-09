@@ -2,6 +2,8 @@ using System.ComponentModel;
 using DotNetModAssess.Core.Models;
 using DotNetModAssess.Mcp.Dtos;
 using DotNetModAssess.Mcp.Services;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using ModelContextProtocol;
 using ModelContextProtocol.Server;
 
@@ -23,6 +25,7 @@ public static class ProjectTools
         "before drilling into one with get_project_details.")]
     public static async Task<IReadOnlyList<ProjectSummaryDto>> ListProjects(
         McpWorkspaceState state,
+        ILoggerFactory? loggerFactory = null,
         [Description("Only include projects with this format: \"SdkStyle\" or \"LegacyStyle\". Omit for all.")]
         string? format = null,
         [Description("Only include projects using this packages model: \"PackageReference\" or \"PackagesConfig\". Omit for all.")]
@@ -37,6 +40,10 @@ public static class ProjectTools
         bool? isTestProject = null,
         CancellationToken cancellationToken = default)
     {
+        var logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger("DotNetModAssess.Mcp.Tools.ProjectTools");
+        logger.LogDebug(
+            "Tool invoked: list_projects (format={Format}, packagesModel={PackagesModel}, nameContains={NameContains})",
+            format, packagesModel, nameContains);
         var solution = await WorkspaceGuard.EnsureLoadedAsync(state, cancellationToken);
 
         IEnumerable<ProjectModel> query = solution.Projects;
@@ -91,8 +98,11 @@ public static class ProjectTools
         McpWorkspaceState state,
         [Description("The project's file path, exactly as returned by list_projects' Path field (e.g. \"src/Foo/Foo.csproj\").")]
         string projectPath,
+        ILoggerFactory? loggerFactory = null,
         CancellationToken cancellationToken = default)
     {
+        var logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger("DotNetModAssess.Mcp.Tools.ProjectTools");
+        logger.LogDebug("Tool invoked: get_project_details (projectPath={ProjectPath})", projectPath);
         var solution = await WorkspaceGuard.EnsureLoadedAsync(state, cancellationToken);
 
         var project = solution.Projects.FirstOrDefault(p => p.Path == projectPath)

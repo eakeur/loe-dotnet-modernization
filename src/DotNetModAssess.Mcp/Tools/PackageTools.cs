@@ -4,6 +4,8 @@ using DotNetModAssess.Core.Models;
 using DotNetModAssess.Core.PackageCompatibility;
 using DotNetModAssess.Mcp.Dtos;
 using DotNetModAssess.Mcp.Services;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using ModelContextProtocol.Server;
 
 namespace DotNetModAssess.Mcp.Tools;
@@ -21,8 +23,10 @@ public static class PackageTools
         "common source of build/runtime surprises worth flagging in an assessment). Does NOT check " +
         "NuGet.org compatibility with a target framework - use check_package_compatibility for that, " +
         "per package, on demand.")]
-    public static async Task<IReadOnlyList<PackageSummaryDto>> ListPackages(McpWorkspaceState state, CancellationToken cancellationToken = default)
+    public static async Task<IReadOnlyList<PackageSummaryDto>> ListPackages(McpWorkspaceState state, ILoggerFactory? loggerFactory = null, CancellationToken cancellationToken = default)
     {
+        var logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger("DotNetModAssess.Mcp.Tools.PackageTools");
+        logger.LogDebug("Tool invoked: list_packages");
         await WorkspaceGuard.EnsureLoadedAsync(state, cancellationToken);
 
         var graph = state.Graph;
@@ -55,8 +59,13 @@ public static class PackageTools
         string currentVersion,
         [Description("The target framework moniker to check compatibility against, e.g. \"net8.0\". Defaults to \"net8.0\" if omitted.")]
         string? targetFrameworkMoniker = "net8.0",
+        ILoggerFactory? loggerFactory = null,
         CancellationToken cancellationToken = default)
     {
+        var logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger("DotNetModAssess.Mcp.Tools.PackageTools");
+        logger.LogDebug(
+            "Tool invoked: check_package_compatibility (packageId={PackageId}, currentVersion={CurrentVersion}, targetFrameworkMoniker={TargetFrameworkMoniker})",
+            packageId, currentVersion, targetFrameworkMoniker);
         var solution = await WorkspaceGuard.EnsureLoadedAsync(state, cancellationToken);
         var solutionRoot = Path.GetDirectoryName(solution.Path) ?? string.Empty;
 

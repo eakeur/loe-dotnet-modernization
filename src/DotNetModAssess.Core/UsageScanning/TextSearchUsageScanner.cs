@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using DotNetModAssess.Core.Models;
+using Microsoft.Extensions.Logging;
 
 namespace DotNetModAssess.Core.UsageScanning;
 
@@ -55,7 +56,8 @@ internal static class TextSearchUsageScanner
         SolutionModel solution,
         IReadOnlyList<RoslynUsageScanner.UsageTarget> targets,
         IReadOnlyList<UsageResult> confirmedResults,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ILogger? logger = null)
     {
         var confirmedKeys = new HashSet<(string FilePath, int LineNumber, string TargetName)>(
             confirmedResults.Select(r => (r.FilePath, r.LineNumber, r.TargetName)));
@@ -86,10 +88,11 @@ internal static class TextSearchUsageScanner
                 {
                     lines = await File.ReadAllLinesAsync(file, cancellationToken).ConfigureAwait(false);
                 }
-                catch (IOException)
+                catch (IOException ex)
                 {
                     // Unreadable file (locked, deleted mid-scan, etc.) -- skip rather than fail the
                     // whole scan over one file this pass doesn't strictly need.
+                    logger?.LogWarning(ex, "Failed to read file {FilePath} during text-match usage search", file);
                     continue;
                 }
 

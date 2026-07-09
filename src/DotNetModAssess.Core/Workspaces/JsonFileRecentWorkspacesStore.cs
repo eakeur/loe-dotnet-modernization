@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace DotNetModAssess.Core.Workspaces;
 
@@ -23,13 +25,15 @@ public sealed class JsonFileRecentWorkspacesStore : IRecentWorkspacesStore
     private readonly SemaphoreSlim _lock = new(1, 1);
 
     private readonly string _filePath;
+    private readonly ILogger<JsonFileRecentWorkspacesStore> _logger;
 
-    public JsonFileRecentWorkspacesStore(string? filePath = null)
+    public JsonFileRecentWorkspacesStore(string? filePath = null, ILogger<JsonFileRecentWorkspacesStore>? logger = null)
     {
         _filePath = filePath ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "DotNetModAssess",
             "recent-workspaces.json");
+        _logger = logger ?? NullLogger<JsonFileRecentWorkspacesStore>.Instance;
     }
 
     public async Task<IReadOnlyList<RecentWorkspaceEntry>> GetRecentAsync(CancellationToken cancellationToken = default)
@@ -61,6 +65,7 @@ public sealed class JsonFileRecentWorkspacesStore : IRecentWorkspacesStore
             deduped.Insert(0, new RecentWorkspaceEntry(fullPath, Path.GetFileName(fullPath), DateTimeOffset.UtcNow));
 
             await WriteAllAsync(deduped.Take(MaxEntries).ToList(), cancellationToken).ConfigureAwait(false);
+            _logger.LogDebug("Recorded {WorkspacePath} as recently opened in {FilePath}", fullPath, _filePath);
         }
         finally
         {
@@ -82,14 +87,16 @@ public sealed class JsonFileRecentWorkspacesStore : IRecentWorkspacesStore
                 .ConfigureAwait(false);
             return entries ?? [];
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
             // Corrupt/partially-written file (e.g. process killed mid-write) - treat as empty
             // rather than throwing away the assessor's ability to open anything.
+            _logger.LogWarning(ex, "Recent-workspaces file {FilePath} is corrupt; falling back to an empty list", _filePath);
             return [];
         }
-        catch (IOException)
+        catch (IOException ex)
         {
+            _logger.LogWarning(ex, "Failed to read recent-workspaces file {FilePath}; falling back to an empty list", _filePath);
             return [];
         }
     }
@@ -111,5 +118,6 @@ public sealed class JsonFileRecentWorkspacesStore : IRecentWorkspacesStore
         }
 
         File.Move(tempPath, _filePath, overwrite: true);
+        _logger.LogDebug("Wrote {EntryCount} recent-workspace entries to {FilePath}", entries.Count, _filePath);
     }
 }

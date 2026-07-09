@@ -1,6 +1,7 @@
 using DotNetModAssess.Core.Models;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.Extensions.Logging;
 
 namespace DotNetModAssess.Core.LegacyPatterns;
 
@@ -34,7 +35,7 @@ namespace DotNetModAssess.Core.LegacyPatterns;
 /// authoring types), so a bare import isn't itself evidence of the idiom this detector exists to
 /// flag.</para>
 /// </summary>
-public sealed class ConfigurationManagerPatternDetector : ILegacyPatternDetector
+public sealed class ConfigurationManagerPatternDetector(ILogger<ConfigurationManagerPatternDetector>? logger = null) : ILegacyPatternDetector
 {
     public string PatternName => "ConfigurationManager";
 
@@ -46,6 +47,7 @@ public sealed class ConfigurationManagerPatternDetector : ILegacyPatternDetector
     public async Task<IReadOnlyList<UsageResult>> DetectAsync(SolutionModel solution, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(solution);
+        logger?.LogDebug("Running {PatternName} detector across {ProjectCount} projects", PatternName, solution.Projects.Count);
         var results = new List<UsageResult>();
 
         foreach (var project in solution.Projects)
@@ -59,6 +61,7 @@ public sealed class ConfigurationManagerPatternDetector : ILegacyPatternDetector
             }
         }
 
+        logger?.LogInformation("{PatternName} detector found {FindingCount} findings", PatternName, results.Count);
         return results;
     }
 

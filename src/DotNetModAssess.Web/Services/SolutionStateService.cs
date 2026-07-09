@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using DotNetModAssess.Core.Graph;
 using DotNetModAssess.Core.LegacyPatterns;
 using DotNetModAssess.Core.Models;
@@ -116,8 +117,12 @@ public sealed class SolutionStateService(
     {
         if (IsLoading)
         {
+            logger.LogDebug("LoadSolutionAsync called for '{SolutionPath}' while a load is already in progress; ignoring.", solutionPath);
             return;
         }
+
+        var stopwatch = Stopwatch.StartNew();
+        logger.LogInformation("Starting solution load for '{SolutionPath}'.", solutionPath);
 
         IsLoading = true;
         LastError = null;
@@ -143,6 +148,7 @@ public sealed class SolutionStateService(
             UsageResults = usageResults;
             LegacyFindings = legacyFindings;
             LastLoadedPath = solutionPath;
+            logger.LogDebug("Loaded state assigned for '{SolutionPath}'; starting file watcher.", solutionPath);
             StartWatching(solution.Path);
 
             // Best-effort: a failure to persist "recently opened" should never fail the load
@@ -155,6 +161,11 @@ public sealed class SolutionStateService(
             {
                 logger.LogWarning(ex, "Failed to record '{SolutionPath}' as a recently-opened workspace.", solutionPath);
             }
+
+            stopwatch.Stop();
+            logger.LogInformation(
+                "Completed solution load for '{SolutionPath}' with {ProjectCount} projects in {ElapsedMs}ms.",
+                solutionPath, solution.Projects.Count, stopwatch.ElapsedMilliseconds);
         }
         catch (Exception ex)
         {
@@ -175,6 +186,7 @@ public sealed class SolutionStateService(
     /// solution for it to trigger a re-load of.</summary>
     public void CloseSolution()
     {
+        logger.LogInformation("Closing solution '{SolutionPath}'.", LastLoadedPath);
         StopWatching();
         Solution = null;
         _graphCache = null;
@@ -220,6 +232,8 @@ public sealed class SolutionStateService(
 
         watcher.EnableRaisingEvents = true;
         _watcher = watcher;
+
+        logger.LogDebug("Started file watcher rooted at '{Root}'.", root);
     }
 
     private void StopWatching()
@@ -246,6 +260,8 @@ public sealed class SolutionStateService(
         {
             return;
         }
+
+        logger.LogInformation("File watcher detected a change under '{SolutionPath}'; triggering re-scan.", LastLoadedPath);
 
         // Timer callbacks run on a thread-pool thread; LoadSolutionAsync only touches this
         // service's own state and raises Changed, and every page subscribed to Changed already

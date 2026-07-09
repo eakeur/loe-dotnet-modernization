@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using DotNetModAssess.Core.Models;
+using Microsoft.Extensions.Logging;
 
 namespace DotNetModAssess.Core.UsageScanning;
 
@@ -76,9 +77,11 @@ internal static class SuffixHarvestUsageScanner
         IReadOnlyList<RoslynUsageScanner.UsageTarget> targets,
         IReadOnlyList<UsageResult> confirmedResults,
         IReadOnlyList<UsageResult> alreadyReportedResults,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ILogger? logger = null)
     {
         var suffixesByTarget = HarvestSuffixes(confirmedResults);
+        logger?.LogDebug("Harvested suffixes for {TargetCount} targets", suffixesByTarget.Count);
         if (suffixesByTarget.Count == 0)
         {
             return [];
@@ -120,10 +123,11 @@ internal static class SuffixHarvestUsageScanner
                 {
                     lines = await File.ReadAllLinesAsync(file, cancellationToken).ConfigureAwait(false);
                 }
-                catch (IOException)
+                catch (IOException ex)
                 {
                     // Unreadable file (locked, deleted mid-scan, etc.) -- skip rather than fail the
                     // whole scan over one file this pass doesn't strictly need.
+                    logger?.LogWarning(ex, "Failed to read file {FilePath} during suffix-match usage search", file);
                     continue;
                 }
 

@@ -1,6 +1,8 @@
+using System.Diagnostics;
 using Buildalyzer;
 using DotNetModAssess.Core.Models;
 using DotNetModAssess.Core.Parsing.Internal;
+using Microsoft.Extensions.Logging;
 
 namespace DotNetModAssess.Core.Parsing;
 
@@ -15,7 +17,7 @@ namespace DotNetModAssess.Core.Parsing;
 /// <see cref="ProjectModel.Evaluation"/> rather than allowed to propagate, so a single bad project
 /// never aborts the scan of the rest of the solution.
 /// </summary>
-public sealed class BuildalyzerSolutionParser : ISolutionParser
+public sealed class BuildalyzerSolutionParser(ILogger<BuildalyzerSolutionParser>? logger = null) : ISolutionParser
 {
     /// <summary>
     /// Upper bound on concurrent MSBuild evaluations. Buildalyzer/MSBuild evaluation is CPU- and
@@ -30,6 +32,9 @@ public sealed class BuildalyzerSolutionParser : ISolutionParser
     {
         cancellationToken.ThrowIfCancellationRequested();
 
+        var stopwatch = Stopwatch.StartNew();
+        logger?.LogInformation("Starting solution parse for {SolutionPath}", solutionPath);
+
         // Must happen before any Microsoft.Build.* type is touched, including by solution
         // discovery (which uses Microsoft.Build.Construction.SolutionFile to parse .sln files).
         MSBuildEnvironmentInitializer.EnsureRegistered();
@@ -37,6 +42,8 @@ public sealed class BuildalyzerSolutionParser : ISolutionParser
         progress?.Report($"Discovering projects in {Path.GetFileName(solutionPath)}...");
         var discovered = SolutionFileDiscovery.Discover(solutionPath);
         var solutionRoot = Path.GetDirectoryName(discovered.SolutionPath)!;
+
+        logger?.LogDebug("Discovered {ProjectCount} projects under {SolutionRoot}", discovered.Projects.Count, solutionRoot);
 
         var manager = new AnalyzerManager();
 
@@ -51,14 +58,14 @@ public sealed class BuildalyzerSolutionParser : ISolutionParser
             new ParallelOptions { MaxDegreeOfParallelism = MaxConcurrentEvaluations, CancellationToken = cancellationToken },
             (project, ct) =>
             {
-                EvaluationCache.GetOrEvaluate(manager, project.Path);
+                EvaluationCache.GetOrEvaluate(manager, project.Path, logger);
                 var done = Interlocked.Increment(ref evaluatedCount);
                 progress?.Report($"Evaluating {Path.GetFileName(project.Path)}... ({done}/{totalProjects})");
                 return ValueTask.CompletedTask;
             });
 
         progress?.Report("Resolving project reference graph...");
-        var builder = new SolutionGraphBuilder(manager, solutionRoot);
+        var builder = new SolutionGraphBuilder(manager, solutionRoot, logger);
 
         foreach (var project in discovered.Projects)
         {
@@ -67,6 +74,16 @@ public sealed class BuildalyzerSolutionParser : ISolutionParser
         }
 
         var projectModels = builder.GetAllBuiltProjectsInDiscoveryOrder(discovered.Projects.Select(p => p.Path));
+
+        foreach (var projectModel in projectModels)
+        {
+            if (!projectModel.Evaluation.Succeeded)
+            {
+                logger?.LogWarning(
+                    "Evaluation failed for project {ProjectPath}: {ErrorMessage}",
+                    projectModel.Path, projectModel.Evaluation.ErrorMessage);
+            }
+        }
 
         progress?.Report("Resolving NuGet sources and Central Package Management...");
         var directoryPackagesPropsPath = DirectoryBuildFileWalker.FindNearestDirectoryPackagesProps(solutionRoot, solutionRoot);
@@ -81,6 +98,11 @@ public sealed class BuildalyzerSolutionParser : ISolutionParser
             DirectoryBuildTargetsFiles = builder.AllDirectoryBuildTargetsFilesEncountered.ToList(),
             DirectoryPackagesPropsPath = directoryPackagesPropsPath,
         };
+
+        stopwatch.Stop();
+        logger?.LogInformation(
+            "Parsed solution {SolutionPath} with {ProjectCount} projects in {ElapsedMs}ms",
+            solution.Path, projectModels.Count, stopwatch.ElapsedMilliseconds);
 
         return solution;
     }

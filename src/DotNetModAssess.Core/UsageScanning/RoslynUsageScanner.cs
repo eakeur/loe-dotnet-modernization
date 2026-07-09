@@ -3,6 +3,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
+using Microsoft.Extensions.Logging;
 
 namespace DotNetModAssess.Core.UsageScanning;
 
@@ -79,11 +80,13 @@ namespace DotNetModAssess.Core.UsageScanning;
 /// literal matched text for the same underlying target.
 /// </para>
 /// </summary>
-public sealed class RoslynUsageScanner : IUsageScanner
+public sealed class RoslynUsageScanner(ILogger<RoslynUsageScanner>? logger = null) : IUsageScanner
 {
     public async Task<IReadOnlyList<UsageResult>> ScanAsync(SolutionModel solution, IProgress<string>? progress = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(solution);
+
+        logger?.LogInformation("Starting usage scan for solution {SolutionPath} with {ProjectCount} projects", solution.Path, solution.Projects.Count);
 
         var targets = BuildTargets(solution);
         var confirmedResults = new List<UsageResult>();
@@ -99,11 +102,24 @@ public sealed class RoslynUsageScanner : IUsageScanner
                 continue;
             }
 
+            logger?.LogDebug("Scanning project {ProjectPath} against {TargetCount} targets", project.Path, projectTargets.Count);
+
             progress?.Report($"Scanning {project.Name} for usages...");
             foreach (var file in EnumerateSourceFiles(project))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var fileResults = await ScanFileAsync(file, project, projectTargets, cancellationToken).ConfigureAwait(false);
+
+                List<UsageResult> fileResults;
+                try
+                {
+                    fileResults = await ScanFileAsync(file, project, projectTargets, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    logger?.LogWarning(ex, "Failed to scan file {FilePath} for project {ProjectPath}", file, project.Path);
+                    continue;
+                }
+
                 confirmedResults.AddRange(fileResults);
             }
         }
@@ -115,7 +131,7 @@ public sealed class RoslynUsageScanner : IUsageScanner
             .ToList();
 
         progress?.Report("Scanning source for text-match usages...");
-        var textMatchResults = await TextSearchUsageScanner.ScanAsync(solution, targets, orderedConfirmed, cancellationToken)
+        var textMatchResults = await TextSearchUsageScanner.ScanAsync(solution, targets, orderedConfirmed, cancellationToken, logger)
             .ConfigureAwait(false);
 
         var reportedSoFar = new List<UsageResult>(orderedConfirmed.Count + textMatchResults.Count);
@@ -123,7 +139,7 @@ public sealed class RoslynUsageScanner : IUsageScanner
         reportedSoFar.AddRange(textMatchResults);
 
         progress?.Report("Harvesting partial-identifier matches...");
-        var suffixMatchResults = await SuffixHarvestUsageScanner.ScanAsync(solution, targets, orderedConfirmed, reportedSoFar, cancellationToken)
+        var suffixMatchResults = await SuffixHarvestUsageScanner.ScanAsync(solution, targets, orderedConfirmed, reportedSoFar, cancellationToken, logger)
             .ConfigureAwait(false);
 
         // Ordering convention: every Confirmed (Roslyn) result first, in that pass's own sort
@@ -134,6 +150,11 @@ public sealed class RoslynUsageScanner : IUsageScanner
         combined.AddRange(orderedConfirmed);
         combined.AddRange(textMatchResults);
         combined.AddRange(suffixMatchResults);
+
+        logger?.LogInformation(
+            "Completed usage scan for solution {SolutionPath}: {ConfirmedCount} confirmed, {TextMatchCount} text-match, {SuffixMatchCount} suffix-match results",
+            solution.Path, orderedConfirmed.Count, textMatchResults.Count, suffixMatchResults.Count);
+
         return combined;
     }
 

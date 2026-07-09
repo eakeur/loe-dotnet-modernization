@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using DotNetModAssess.Core.Graph;
 using DotNetModAssess.Core.LegacyPatterns;
 using DotNetModAssess.Core.Models;
@@ -152,6 +153,7 @@ public sealed class McpWorkspaceState(
                 // previous debounce-triggered reload was still running, or a manual `reload` tool
                 // call raced with it) - join the existing attempt rather than starting a second,
                 // overlapping one that would stomp the same mutable fields.
+                logger.LogDebug("Load already in progress for '{SolutionPath}'; joining existing attempt.", solutionPath);
                 return LoadingTask;
             }
 
@@ -167,7 +169,14 @@ public sealed class McpWorkspaceState(
 
     private async Task RunLoadAsync(string solutionPath, CancellationToken cancellationToken)
     {
-        var progress = new ActionProgress<string>(message => LoadingStageMessage = message);
+        var stopwatch = Stopwatch.StartNew();
+        logger.LogInformation("Starting workspace load for '{SolutionPath}'.", solutionPath);
+
+        var progress = new ActionProgress<string>(message =>
+        {
+            LoadingStageMessage = message;
+            logger.LogDebug("Load progress for '{SolutionPath}': {StageMessage}", solutionPath, message);
+        });
 
         try
         {
@@ -197,6 +206,11 @@ public sealed class McpWorkspaceState(
             }
 
             Status = WorkspaceLoadStatus.Loaded;
+
+            stopwatch.Stop();
+            logger.LogInformation(
+                "Completed workspace load for '{SolutionPath}' with {ProjectCount} projects in {ElapsedMs}ms.",
+                solutionPath, solution.Projects.Count, stopwatch.ElapsedMilliseconds);
         }
         catch (Exception ex)
         {
@@ -288,6 +302,8 @@ public sealed class McpWorkspaceState(
         {
             return;
         }
+
+        logger.LogInformation("File watcher detected a change under '{SolutionPath}'; triggering re-scan.", LastLoadedPath);
 
         // Timer callbacks run on a thread-pool thread; TriggerLoad only touches this singleton's
         // own state (no UI/circuit to marshal back onto), so no extra dispatch is needed here.

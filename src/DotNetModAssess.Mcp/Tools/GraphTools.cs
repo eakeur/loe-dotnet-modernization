@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using DotNetModAssess.Mcp.Dtos;
 using DotNetModAssess.Mcp.Services;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using ModelContextProtocol;
 using ModelContextProtocol.Server;
 
@@ -24,8 +26,11 @@ public static class GraphTools
         McpWorkspaceState state,
         [Description("The project's file path (as returned by list_projects) or package id (as returned by list_packages) to root the subgraph at.")]
         string rootId,
+        ILoggerFactory? loggerFactory = null,
         CancellationToken cancellationToken = default)
     {
+        var logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger("DotNetModAssess.Mcp.Tools.GraphTools");
+        logger.LogDebug("Tool invoked: get_dependency_graph (rootId={RootId})", rootId);
         await WorkspaceGuard.EnsureLoadedAsync(state, cancellationToken);
 
         var graph = state.Graph

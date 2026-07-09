@@ -1,4 +1,5 @@
 using DotNetModAssess.Core.Models;
+using Microsoft.Extensions.Logging;
 
 namespace DotNetModAssess.Core.Graph;
 
@@ -110,10 +111,12 @@ public sealed class NotImplementedDependencyGraphBuilder : IDependencyGraphBuild
 /// flagging a version conflict when more than one distinct version is used), plus
 /// project-to-project and project-to-package edges mirroring the model's references.
 /// </summary>
-public sealed class DependencyGraphBuilder : IDependencyGraphBuilder
+public sealed class DependencyGraphBuilder(ILogger<DependencyGraphBuilder>? logger = null) : IDependencyGraphBuilder
 {
     public DependencyGraph Build(SolutionModel solution)
     {
+        logger?.LogDebug("Building dependency graph for solution {SolutionPath} with {ProjectCount} projects", solution.Path, solution.Projects.Count);
+
         var projectNodes = solution.Projects
             .Select(p => new ProjectGraphNode { Project = p })
             .ToList();
@@ -171,10 +174,16 @@ public sealed class DependencyGraphBuilder : IDependencyGraphBuilder
             }
         }
 
-        return new DependencyGraph
+        var graph = new DependencyGraph
         {
             Nodes = [.. projectNodes.Cast<GraphNode>(), .. packageNodes],
             Edges = edges
         };
+
+        logger?.LogInformation(
+            "Built dependency graph with {NodeCount} nodes ({ProjectNodeCount} projects, {PackageNodeCount} packages) and {EdgeCount} edges",
+            graph.Nodes.Count, projectNodes.Count, packageNodes.Count, edges.Count);
+
+        return graph;
     }
 }
