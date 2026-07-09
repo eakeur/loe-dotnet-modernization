@@ -1,0 +1,36 @@
+.dependency-graph-canvas {
+    width: 100%;
+    height: 70vh;
+    min-height: 480px;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    background-color: #fafafa;
+}
+
+.legend-swatch {
+    display: inline-block;
+    width: 0.85rem;
+    height: 0.85rem;
+    margin-right: 0.35rem;
+    border: 1px solid #54585f;
+    vertical-align: middle;
+}
+
+.legend-project {
+    background-color: #3b6fb6;
+    border-color: #1f3f66;
+    border-radius: 3px;
+}
+
+.legend-package {
+    background-color: #8a8f98;
+    border-color: #54585f;
+    border-radius: 50%;
+}
+
+.legend-conflict {
+    background-color: #d9534f;
+    border-color: #7a1f1a;
+    border-width: 2px;
+    border-radius: 50%;
+}

@@ -1,0 +1,27 @@
+@page "/graph"
+@inject SolutionStateService State
+@implements IDisposable
+
+<PageTitle>Dependency Graph</PageTitle>
+
+<h1>Dependency Graph</h1>
+
+@if (State.Solution is null || State.Graph is null)
+{
+    <p class="text-muted">No solution loaded yet. <a href="/">Go load one</a>.</p>
+}
+else
+{
+    <DependencyGraphView Graph="State.Graph" Solution="State.Solution" />
+}
+
+@code {
+    protected override void OnInitialized()
+    {
+        State.Changed += OnStateChanged;
+    }
+
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => State.Changed -= OnStateChanged;
+}
