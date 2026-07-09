@@ -38,10 +38,36 @@ public sealed class UsageReportExporter
     {
         var sb = new StringBuilder();
 
+        var confirmed = usageResults.Where(u => u.Confidence == UsageConfidence.Confirmed).ToList();
+        var textMatch = usageResults.Where(u => u.Confidence == UsageConfidence.TextMatch).ToList();
+
         sb.AppendLine("# Usage Report");
         sb.AppendLine();
         sb.AppendLine($"**Total occurrences:** {usageResults.Count}");
+        sb.AppendLine($"**Confirmed (Roslyn syntax match):** {confirmed.Count}");
+        sb.AppendLine($"**Possible (text match only):** {textMatch.Count}");
         sb.AppendLine();
+
+        sb.AppendLine("## Confirmed usages");
+        sb.AppendLine();
+        sb.AppendLine(
+            "Matched by the Roslyn syntax-tree pass (using directives, fully-qualified type " +
+            "references, member accesses, attributes, base types/interfaces). High confidence.");
+        sb.AppendLine();
+        sb.AppendLine($"**Count:** {confirmed.Count}");
+        sb.AppendLine();
+        AppendOccurrenceTable(sb, confirmed);
+
+        sb.AppendLine("## Possible usages (text match only - verify manually)");
+        sb.AppendLine();
+        sb.AppendLine(
+            "Matched only by the plain word-boundary text-search pass - not confirmed by Roslyn's " +
+            "syntax analysis. May include comments, string literals, or coincidental name " +
+            "collisions; treat these as leads for manual review, not ground truth.");
+        sb.AppendLine();
+        sb.AppendLine($"**Count:** {textMatch.Count}");
+        sb.AppendLine();
+        AppendOccurrenceTable(sb, textMatch);
 
         sb.AppendLine("## Counts by Matched Symbol");
         sb.AppendLine();
@@ -88,5 +114,31 @@ public sealed class UsageReportExporter
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>Renders a flat file/line occurrence table for a single confidence bucket (used by
+    /// the "Confirmed usages" / "Possible usages" sections). Emits a one-line placeholder instead
+    /// of an empty table when <paramref name="usages"/> is empty.</summary>
+    private static void AppendOccurrenceTable(StringBuilder sb, IReadOnlyList<UsageResult> usages)
+    {
+        if (usages.Count == 0)
+        {
+            sb.AppendLine("_None._");
+            sb.AppendLine();
+            return;
+        }
+
+        sb.AppendLine("| Project | File | Line | Kind | Symbol | Snippet |");
+        sb.AppendLine("|---|---|---|---|---|---|");
+        foreach (var usage in usages
+                     .OrderBy(u => u.FilePath, StringComparer.OrdinalIgnoreCase)
+                     .ThenBy(u => u.LineNumber))
+        {
+            var snippet = usage.CodeSnippet?.Replace("|", "\\|") ?? "";
+            sb.AppendLine(
+                $"| {usage.ProjectPath ?? "(unknown)"} | {usage.FilePath} | {usage.LineNumber} | " +
+                $"{usage.Kind} | {usage.MatchedSymbol} | `{snippet}` |");
+        }
+        sb.AppendLine();
     }
 }

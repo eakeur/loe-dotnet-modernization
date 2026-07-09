@@ -35,7 +35,7 @@ else
             <button class="nav-link @(_activeTab == Tab.Metadata ? "active" : "")" @onclick='() => _activeTab = Tab.Metadata'>Metadata</button>
         </li>
         <li class="nav-item">
-            <button class="nav-link @(_activeTab == Tab.Usages ? "active" : "")" @onclick='() => _activeTab = Tab.Usages'>Usages (@_usagesOfThisProject.Count)</button>
+            <button class="nav-link @(_activeTab == Tab.Usages ? "active" : "")" @onclick='() => _activeTab = Tab.Usages'>Usages (@_confirmedUsageCount confirmed, @_possibleUsageCount possible)</button>
         </li>
     </ul>
 
@@ -110,7 +110,7 @@ else
                     @foreach (var package in _project.PackageReferences)
                     {
                         var conflict = GetPackageConflict(package.PackageId);
-                        var usageCount = CountUsagesOfSymbol(package.PackageId);
+                        var (confirmedUsages, possibleUsages) = CountUsagesOfSymbolByConfidence(package.PackageId);
                         <tr>
                             <td>@package.PackageId</td>
                             <td>@(package.RequestedVersion ?? "-")</td>
@@ -129,7 +129,23 @@ else
                                     <span class="text-muted">-</span>
                                 }
                             </td>
-                            <td>@usageCount</td>
+                            <td>
+                                @if (confirmedUsages == 0 && possibleUsages == 0)
+                                {
+                                    <span class="text-muted">0</span>
+                                }
+                                else
+                                {
+                                    @if (confirmedUsages > 0)
+                                    {
+                                        <span class="badge bg-success me-1" title="Confirmed by Roslyn syntax analysis">@confirmedUsages confirmed</span>
+                                    }
+                                    @if (possibleUsages > 0)
+                                    {
+                                        <span class="badge bg-warning text-dark" title="Text match only - not confirmed by Roslyn syntax analysis">@possibleUsages possible</span>
+                                    }
+                                }
+                            </td>
                         </tr>
                     }
                 </tbody>
@@ -240,10 +256,13 @@ else
     else if (_activeTab == Tab.Usages)
     {
         <p class="text-muted">
-            Roslyn syntax-tree usages of this project's approximate namespace
+            Usages of this project's approximate namespace
             (<code>@(_project.Metadata.RootNamespace ?? _project.Metadata.AssemblyName ?? _project.Name)</code>)
             found across the rest of the solution's source - a count and file/line breakdown of how much
-            removing or replacing this project would actually touch.
+            removing or replacing this project would actually touch. <span class="badge bg-success">Confirmed</span>
+            results are matched by Roslyn syntax analysis (high confidence); <span class="badge bg-warning text-dark">Possible</span>
+            results are matched only by a plain text search (e.g. non-C# files, string literals, comments) and
+            are worth a manual look before you rely on them.
         </p>
         @if (_usagesOfThisProject.Count == 0)
         {
@@ -254,6 +273,7 @@ else
             <table class="table table-sm table-hover">
                 <thead>
                     <tr>
+                        <th>Confidence</th>
                         <th>Consuming project</th>
                         <th>File</th>
                         <th>Line</th>
@@ -266,6 +286,16 @@ else
                     @foreach (var usage in _usagesOfThisProject)
                     {
                         <tr>
+                            <td>
+                                @if (usage.Confidence == UsageConfidence.Confirmed)
+                                {
+                                    <span class="badge bg-success">Confirmed</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-warning text-dark">Possible</span>
+                                }
+                            </td>
                             <td>@(usage.ProjectPath is null ? "-" : usage.ProjectPath)</td>
                             <td><code>@usage.FilePath</code></td>
                             <td>@usage.LineNumber</td>
@@ -287,6 +317,8 @@ else
     private ProjectModel? _project;
     private List<ProjectModel> _dependents = [];
     private List<UsageResult> _usagesOfThisProject = [];
+    private int _confirmedUsageCount;
+    private int _possibleUsageCount;
     private Tab _activeTab = Tab.Dependencies;
     private string _rawPropertySearch = "";
 
@@ -300,12 +332,16 @@ else
             _project = null;
             _dependents = [];
             _usagesOfThisProject = [];
+            _confirmedUsageCount = 0;
+            _possibleUsageCount = 0;
             return;
         }
 
         _project = State.Solution.Projects.FirstOrDefault(p => p.Path == ProjectPath);
         _dependents = FindDependents();
         _usagesOfThisProject = FindUsagesOfThisProject();
+        _confirmedUsageCount = _usagesOfThisProject.Count(u => u.Confidence == UsageConfidence.Confirmed);
+        _possibleUsageCount = _usagesOfThisProject.Count(u => u.Confidence == UsageConfidence.TextMatch);
     }
 
     private List<UsageResult> FindUsagesOfThisProject()
@@ -319,7 +355,13 @@ else
         return MatchUsagesOfSymbol(target).ToList();
     }
 
-    private int CountUsagesOfSymbol(string symbol) => MatchUsagesOfSymbol(symbol).Count();
+    private (int Confirmed, int Possible) CountUsagesOfSymbolByConfidence(string symbol)
+    {
+        var matches = MatchUsagesOfSymbol(symbol).ToList();
+        return (
+            matches.Count(u => u.Confidence == UsageConfidence.Confirmed),
+            matches.Count(u => u.Confidence == UsageConfidence.TextMatch));
+    }
 
     private IEnumerable<UsageResult> MatchUsagesOfSymbol(string symbol) =>
         (State.UsageResults ?? [])

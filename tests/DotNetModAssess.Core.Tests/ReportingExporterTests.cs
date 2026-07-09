@@ -246,4 +246,43 @@ public class ReportingExporterTests : IDisposable
         Assert.DoesNotContain("System.ServiceModel", content);
         Assert.Contains("SampleApp.Shared", content);
     }
+
+    [Fact]
+    public async Task UsageReportExporter_SeparatesConfirmedAndTextMatchIntoOwnSectionsWithOwnCounts()
+    {
+        // The fixture's usage results all default to UsageConfidence.Confirmed (they predate the
+        // Confidence field), so add one synthetic TextMatch result to exercise the split.
+        var withTextMatch = _usageResults.Append(new UsageResult
+        {
+            FilePath = "src/SampleApp.Web/Program.cs",
+            LineNumber = 99,
+            MatchedSymbol = "Newtonsoft.Json",
+            Kind = UsageReferenceKind.Other,
+            ProjectPath = "src/SampleApp.Web/SampleApp.Web.csproj",
+            CodeSnippet = "// mentions Newtonsoft.Json in a comment",
+            Confidence = UsageConfidence.TextMatch,
+        }).ToList();
+
+        var exporter = new UsageReportExporter();
+        var path = TempPath("usage-confidence.md");
+
+        await exporter.ExportAsync(withTextMatch, path);
+
+        var content = await File.ReadAllTextAsync(path);
+
+        Assert.Contains("**Total occurrences:** 6", content);
+        Assert.Contains("**Confirmed (Roslyn syntax match):** 5", content);
+        Assert.Contains("**Possible (text match only):** 1", content);
+        Assert.Contains("## Confirmed usages", content);
+        Assert.Contains("## Possible usages (text match only - verify manually)", content);
+
+        // The synthetic TextMatch row must land after the "Possible usages" heading and not
+        // inside the "Confirmed usages" table.
+        var confirmedHeadingIndex = content.IndexOf("## Confirmed usages", StringComparison.Ordinal);
+        var possibleHeadingIndex = content.IndexOf("## Possible usages", StringComparison.Ordinal);
+        var syntheticRowIndex = content.IndexOf("mentions Newtonsoft.Json in a comment", StringComparison.Ordinal);
+
+        Assert.True(confirmedHeadingIndex >= 0 && possibleHeadingIndex > confirmedHeadingIndex);
+        Assert.True(syntheticRowIndex > possibleHeadingIndex);
+    }
 }
