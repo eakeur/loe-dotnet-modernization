@@ -7,7 +7,7 @@
 
 <nav class="vsc-activitybar" aria-label="Activity Bar">
     <div class="vsc-activitybar-top">
-        <a class="vsc-activitybar-item @(IsActive("/workspace") ? "active" : "")" href="/workspace" title="Explorer">
+        <a class="vsc-activitybar-item @(IsExplorerActive() ? "active" : "")" href="/workspace" title="Explorer">
             <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 4h6l2 2h10v13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4z"/></svg>
         </a>
         <a class="vsc-activitybar-item @(IsActive("/workspace/search") ? "active" : "")" href="/workspace/search" title="Search">
@@ -48,6 +48,13 @@
     private bool IsActive(string path) =>
         Nav.ToBaseRelativePath(Nav.Uri).Equals(path.TrimStart('/'), StringComparison.OrdinalIgnoreCase) ||
         Nav.ToBaseRelativePath(Nav.Uri).StartsWith(path.TrimStart('/') + "/", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Explorer covers every workspace route *except* the two other Activity Bar
+    /// destinations' own routes (Search, Findings) - otherwise it would show "active" even while
+    /// actually looking at Search or Findings, since both of those routes are also nested under
+    /// "/workspace".</summary>
+    private bool IsExplorerActive() =>
+        IsActive("/workspace") && !IsActive("/workspace/search") && !IsActive("/workspace/findings");
 
     private void CloseWorkspace()
     {
