@@ -38,6 +38,18 @@ try
     builder.Services.AddRazorComponents()
         .AddInteractiveServerComponents();
 
+    // Blazor Server's internal SignalR hub defaults to a 32KB MaximumReceiveMessageSize for
+    // client-to-server messages - fine for UI events, but AnalysisCacheService.TryGetAsync reads a
+    // cached solution's full analysis JSON back from localStorage via JS interop, and that payload
+    // (SolutionModel + DependencyGraph + findings) routinely exceeds 32KB for anything but a tiny
+    // fixture. Without raising this, the JS->'.NET response for that call is silently dropped and
+    // the call hangs until AnalysisCacheService's own timeout gives up on it. There's no
+    // hub-specific option for Blazor's internal ComponentHub, so this configures the shared
+    // HubOptions default every hub falls back to, per Microsoft's documented guidance for this
+    // exact scenario.
+    builder.Services.Configure<Microsoft.AspNetCore.SignalR.HubOptions>(options =>
+        options.MaximumReceiveMessageSize = 10 * 1024 * 1024);
+
     // Real Buildalyzer-backed parser + graph builder + Roslyn usage scanner + report/graph exporters,
     // per-circuit solution state (see SolutionStateService for why Scoped).
     builder.Services.AddScoped<ISolutionParser, BuildalyzerSolutionParser>();

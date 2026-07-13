@@ -32,6 +32,13 @@ public sealed class AnalysisCacheService(IJSRuntime jsRuntime, ILogger<AnalysisC
 {
     private const string KeyPrefix = "dotnetmodassess.analysisCache::";
 
+    // JS interop calls issued right as a circuit is (re)connecting - e.g. LoadSolutionAsync firing
+    // from a click that lands before the SignalR circuit has fully attached - can hang indefinitely
+    // rather than throw: the RemoteJSRuntime's pending-call promise never resolves if the connection
+    // that would carry the response never comes up. Bounding every call here means a stalled JS
+    // runtime degrades to "skip the cache this time", never "the whole solution load never finishes".
+    private static readonly TimeSpan JsCallTimeout = TimeSpan.FromSeconds(3);
+
     // ReferenceHandler.IgnoreCycles rather than the default: ProjectModel.ProjectReferences holds
     // nested ProjectModel instances (not just paths), and while a valid solution's reference graph
     // is a DAG, a malformed one could contain a real cycle - IgnoreCycles serializes those safely
@@ -41,9 +48,46 @@ public sealed class AnalysisCacheService(IJSRuntime jsRuntime, ILogger<AnalysisC
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        Converters = { new JsonStringEnumConverter() },
+        Converters = { new JsonStringEnumConverter(), new GraphNodeJsonConverter() },
         ReferenceHandler = ReferenceHandler.IgnoreCycles,
     };
+
+    // DependencyGraph.Nodes is IReadOnlyList<GraphNode>, an abstract base with two sealed
+    // subtypes (ProjectGraphNode/PackageGraphNode) - System.Text.Json can't deserialize an
+    // abstract/interface type on its own, so a plain JsonSerializer.Deserialize<CachedSolutionAnalysis>
+    // throws NotSupportedException on every read (writes succeed silently, since serializing a
+    // concrete instance through its base type is fine - only deserialization needs help). This
+    // converter uses the existing Kind discriminator to pick the concrete subtype to deserialize into.
+    private sealed class GraphNodeJsonConverter : JsonConverter<GraphNode>
+    {
+        public override GraphNode? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            using var doc = JsonDocument.ParseValue(ref reader);
+            var kind = doc.RootElement.GetProperty("kind").GetString();
+            var raw = doc.RootElement.GetRawText();
+            return kind switch
+            {
+                nameof(GraphNodeKind.Project) => JsonSerializer.Deserialize<ProjectGraphNode>(raw, options),
+                nameof(GraphNodeKind.Package) => JsonSerializer.Deserialize<PackageGraphNode>(raw, options),
+                _ => throw new JsonException($"Unknown graph node kind '{kind}'."),
+            };
+        }
+
+        public override void Write(Utf8JsonWriter writer, GraphNode value, JsonSerializerOptions options)
+        {
+            switch (value)
+            {
+                case ProjectGraphNode node:
+                    JsonSerializer.Serialize(writer, node, options);
+                    break;
+                case PackageGraphNode node:
+                    JsonSerializer.Serialize(writer, node, options);
+                    break;
+                default:
+                    throw new JsonException($"Unknown graph node type '{value.GetType()}'.");
+            }
+        }
+    }
 
     private IJSObjectReference? _module;
 
@@ -52,8 +96,11 @@ public sealed class AnalysisCacheService(IJSRuntime jsRuntime, ILogger<AnalysisC
     {
         try
         {
-            var module = await GetModuleAsync();
-            var json = await module.InvokeAsync<string?>("getItem", cancellationToken, CacheKey(solutionPath));
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(JsCallTimeout);
+
+            var module = await GetModuleAsync(cts.Token);
+            var json = await module.InvokeAsync<string?>("getItem", cts.Token, CacheKey(solutionPath));
             if (string.IsNullOrEmpty(json))
             {
                 return null;
@@ -78,9 +125,12 @@ public sealed class AnalysisCacheService(IJSRuntime jsRuntime, ILogger<AnalysisC
     {
         try
         {
-            var module = await GetModuleAsync();
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(JsCallTimeout);
+
+            var module = await GetModuleAsync(cts.Token);
             var json = JsonSerializer.Serialize(analysis, JsonOptions);
-            await module.InvokeVoidAsync("setItem", cancellationToken, CacheKey(solutionPath), json);
+            await module.InvokeVoidAsync("setItem", cts.Token, CacheKey(solutionPath), json);
         }
         catch (Exception ex)
         {
@@ -92,8 +142,11 @@ public sealed class AnalysisCacheService(IJSRuntime jsRuntime, ILogger<AnalysisC
     {
         try
         {
-            var module = await GetModuleAsync();
-            await module.InvokeVoidAsync("removeItem", cancellationToken, CacheKey(solutionPath));
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(JsCallTimeout);
+
+            var module = await GetModuleAsync(cts.Token);
+            await module.InvokeVoidAsync("removeItem", cts.Token, CacheKey(solutionPath));
         }
         catch (Exception ex)
         {
@@ -101,8 +154,8 @@ public sealed class AnalysisCacheService(IJSRuntime jsRuntime, ILogger<AnalysisC
         }
     }
 
-    private async Task<IJSObjectReference> GetModuleAsync() =>
-        _module ??= await jsRuntime.InvokeAsync<IJSObjectReference>("import", "./js/analysisCache.js");
+    private async Task<IJSObjectReference> GetModuleAsync(CancellationToken cancellationToken) =>
+        _module ??= await jsRuntime.InvokeAsync<IJSObjectReference>("import", cancellationToken, "./js/analysisCache.js");
 
     private static string CacheKey(string solutionPath) => KeyPrefix + solutionPath;
 }
