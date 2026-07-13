@@ -111,6 +111,66 @@ const NODE_STYLE = [
     }
 ];
 
+// cose is force-directed, not overlap-free by construction - even with generous repulsion/spacing
+// tuning it can still leave a handful of nodes touching, especially with the variable label-driven
+// node sizes used here. This is a deterministic cleanup pass run once after the layout settles: it
+// repeatedly nudges apart any pair of nodes whose (padded) bounding boxes still intersect, so the
+// rendered graph never shows one node literally overflowing another.
+function separateOverlaps(cy, padding = 10, maxIterations = 200) {
+    const nodes = cy.nodes().toArray();
+
+    for (let iteration = 0; iteration < maxIterations; iteration++) {
+        let anyOverlap = false;
+
+        for (let i = 0; i < nodes.length; i++) {
+            for (let j = i + 1; j < nodes.length; j++) {
+                const a = nodes[i];
+                const b = nodes[j];
+                const bbA = a.boundingBox();
+                const bbB = b.boundingBox();
+
+                const overlapX = Math.min(bbA.x2, bbB.x2) - Math.max(bbA.x1, bbB.x1) + padding;
+                const overlapY = Math.min(bbA.y2, bbB.y2) - Math.max(bbA.y1, bbB.y1) + padding;
+
+                if (overlapX <= 0 || overlapY <= 0) {
+                    continue;
+                }
+
+                anyOverlap = true;
+
+                const centerAX = (bbA.x1 + bbA.x2) / 2;
+                const centerAY = (bbA.y1 + bbA.y2) / 2;
+                const centerBX = (bbB.x1 + bbB.x2) / 2;
+                const centerBY = (bbB.y1 + bbB.y2) / 2;
+
+                let dx = centerAX - centerBX;
+                let dy = centerAY - centerBY;
+                const dist = Math.sqrt((dx * dx) + (dy * dy));
+                if (dist < 0.01) {
+                    // Perfectly coincident centers - nudge in an arbitrary direction to break the tie.
+                    dx = 1;
+                    dy = 0;
+                } else {
+                    dx /= dist;
+                    dy /= dist;
+                }
+
+                const pushX = (overlapX / 2) * dx;
+                const pushY = (overlapY / 2) * dy;
+
+                const posA = a.position();
+                const posB = b.position();
+                a.position({ x: posA.x + pushX, y: posA.y + pushY });
+                b.position({ x: posB.x - pushX, y: posB.y - pushY });
+            }
+        }
+
+        if (!anyOverlap) {
+            break;
+        }
+    }
+}
+
 function toElements(nodes, edges) {
     const nodeElements = nodes.map((n) => ({
         data: {
@@ -143,9 +203,23 @@ export function init(container, nodes, edges, dotNetRef) {
             name: "cose",
             animate: false,
             nodeDimensionsIncludeLabels: true,
-            padding: 30
+            padding: 30,
+            randomize: true,
+            componentSpacing: 100,
+            nodeRepulsion: () => 8000,
+            nodeOverlap: 40,
+            idealEdgeLength: () => 100,
+            edgeElasticity: () => 100,
+            numIter: 2500
         },
         wheelSensitivity: 0.2
+    });
+
+    // cose's own overlap avoidance is best-effort; run the deterministic cleanup pass once the
+    // layout settles, then re-fit since separateOverlaps can push nodes outside the prior viewport.
+    cy.one("layoutstop", () => {
+        separateOverlaps(cy);
+        cy.fit(undefined, 30);
     });
 
     cy.on("tap", "node", (evt) => {
@@ -164,6 +238,8 @@ export function init(container, nodes, edges, dotNetRef) {
         // Click-to-focus: `focusId` is the clicked node; `neighborhoodIds` is the full set of
         // node ids (upstream + downstream) that should stay fully visible. Everything else fades.
         highlight(focusId, neighborhoodIds) {
+            let focusNode = null;
+
             cy.batch(() => {
                 cy.elements().removeClass("faded highlighted focus");
 
@@ -191,11 +267,21 @@ export function init(container, nodes, edges, dotNetRef) {
                     }
                 });
 
-                const focusNode = cy.getElementById(focusId);
+                focusNode = cy.getElementById(focusId);
                 if (focusNode && focusNode.length > 0) {
                     focusNode.removeClass("faded").addClass("focus highlighted");
+                } else {
+                    focusNode = null;
                 }
             });
+
+            // Re-center the viewport on the focused node (outside the batch above, since this is
+            // an animation, not a style mutation) - both for a real click and for the initial
+            // "detail panel" focus - so the node being inspected is always where the assessor is
+            // actually looking, not wherever cose happened to place it.
+            if (focusNode) {
+                cy.animate({ center: { eles: focusNode } }, { duration: 300 });
+            }
         },
 
         clearHighlight() {
