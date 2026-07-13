@@ -52,6 +52,7 @@ public sealed class SolutionStateService(
     IUsageScanner usageScanner,
     ILegacyPatternScanner legacyPatternScanner,
     IRecentWorkspacesStore recentWorkspacesStore,
+    AnalysisCacheService analysisCache,
     ILogger<SolutionStateService> logger) : IDisposable
 {
     private static readonly string[] WatchedFilters =
@@ -137,14 +138,39 @@ public sealed class SolutionStateService(
         try
         {
             progress.Report("Starting...");
-            var solution = await parser.ParseAsync(solutionPath, progress, cancellationToken);
 
-            var usageResults = await usageScanner.ScanAsync(solution, progress, cancellationToken);
+            var sourceStamp = ComputeSourceStamp(solutionPath);
+            var cached = await analysisCache.TryGetAsync(solutionPath, sourceStamp, cancellationToken);
 
-            var legacyFindings = await legacyPatternScanner.ScanAsync(solution, progress, cancellationToken);
+            SolutionModel solution;
+            IReadOnlyList<UsageResult> usageResults;
+            IReadOnlyList<UsageResult> legacyFindings;
+
+            if (cached is not null)
+            {
+                logger.LogInformation("Using cached analysis for '{SolutionPath}'; nothing under it has changed since it was cached.", solutionPath);
+                progress.Report("Loaded from cache...");
+                solution = cached.Solution;
+                usageResults = cached.UsageResults;
+                legacyFindings = cached.LegacyFindings;
+                _graphCache = cached.Graph;
+            }
+            else
+            {
+                solution = await parser.ParseAsync(solutionPath, progress, cancellationToken);
+                usageResults = await usageScanner.ScanAsync(solution, progress, cancellationToken);
+                legacyFindings = await legacyPatternScanner.ScanAsync(solution, progress, cancellationToken);
+
+                var graph = graphBuilder.Build(solution);
+                _graphCache = graph;
+
+                await analysisCache.SaveAsync(
+                    solutionPath,
+                    new CachedSolutionAnalysis(solution, graph, usageResults, legacyFindings, sourceStamp),
+                    cancellationToken);
+            }
 
             Solution = solution;
-            _graphCache = null; // rebuilt lazily on first access against the new Solution
             UsageResults = usageResults;
             LegacyFindings = legacyFindings;
             LastLoadedPath = solutionPath;
@@ -246,6 +272,36 @@ public sealed class SolutionStateService(
         _watcher.EnableRaisingEvents = false;
         _watcher.Dispose();
         _watcher = null;
+    }
+
+    /// <summary>A cheap freshness stamp for <see cref="AnalysisCacheService"/>: the latest last-write-time
+    /// across the solution file itself and every file matching <see cref="WatchedFilters"/> under its
+    /// directory tree - the same universe of files <see cref="StartWatching"/> watches for live re-scans.
+    /// A cached analysis is only trusted if this stamp is unchanged since it was cached, so any edit that
+    /// would otherwise trigger the file watcher's re-scan also invalidates the cache.</summary>
+    private static DateTime ComputeSourceStamp(string solutionPath)
+    {
+        var stamp = File.Exists(solutionPath) ? File.GetLastWriteTimeUtc(solutionPath) : DateTime.MinValue;
+
+        var root = Path.GetDirectoryName(solutionPath);
+        if (root is null || !Directory.Exists(root))
+        {
+            return stamp;
+        }
+
+        foreach (var filter in WatchedFilters)
+        {
+            foreach (var file in Directory.EnumerateFiles(root, filter, SearchOption.AllDirectories))
+            {
+                var writeTime = File.GetLastWriteTimeUtc(file);
+                if (writeTime > stamp)
+                {
+                    stamp = writeTime;
+                }
+            }
+        }
+
+        return stamp;
     }
 
     private void OnWatchedFileEvent(object sender, FileSystemEventArgs e) =>

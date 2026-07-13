@@ -45,6 +45,7 @@ try
     builder.Services.AddScoped<IUsageScanner, RoslynUsageScanner>();
     builder.Services.AddScoped<IReportExporter, MarkdownJsonReportExporter>();
     builder.Services.AddScoped<IGraphExporter, DotMermaidGraphExporter>();
+    builder.Services.AddScoped<AnalysisCacheService>();
     builder.Services.AddScoped<SolutionStateService>();
 
     // Singleton, not Scoped like the services above: NuGetCompatibilityChecker holds no per-circuit
